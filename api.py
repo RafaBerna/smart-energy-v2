@@ -414,7 +414,13 @@ def get_weather_by_location(location: str):
 
 @app.get("/import-omie")
 def import_omie():
-    from scripts.fetch_omie import fetch_and_store
+    from scripts.fetch_omie import fetch_list_page, process_latest_available
 
-    fetch_and_store(0)  # hoy
+    html = fetch_list_page()
+
+    if not html:
+        return {"status": "error", "message": "No se pudo cargar listado OMIE"}
+
+    process_latest_available(html)
+
     return {"status": "ok"}
