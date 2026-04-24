@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Database
+database/omie.db
+
+# Local imported/exported data
+data/datadis/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Env / secrets
+.env
+.env.*
