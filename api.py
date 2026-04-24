@@ -22,6 +22,19 @@ OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 # ║ DATABASE                                                  ║
 # ╚════════════════════════════════════════════════════════════╝
 
+def init_db():
+    conn = sqlite3.connect("database/omie.db")
+    cursor = conn.cursor()
+
+    with open("database/schema.sql", "r", encoding="utf-8") as f:
+        cursor.executescript(f.read())
+
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
 def get_db_connection():
     conn = sqlite3.connect("database/omie.db")
     conn.row_factory = sqlite3.Row
