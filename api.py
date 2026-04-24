@@ -411,3 +411,10 @@ def build_weather_payload(location):
 @app.get("/weather/by-location")
 def get_weather_by_location(location: str):
     return build_weather_payload(location)
+
+@app.get("/import-omie")
+def import_omie():
+    from scripts.fetch_omie import fetch_and_store
+
+    fetch_and_store(0)  # hoy
+    return {"status": "ok"}
