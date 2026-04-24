@@ -8,20 +8,14 @@ import {
   fetchWeatherByLocation,
 } from "../services/api";
 
-// ======================
-// HELPERS · FORMATTERS
-// ======================
+// ╔════════════════════════════════════════════════════════════╗
+// ║ HELPERS · FORMATTERS                                                         ║
+// ╚════════════════════════════════════════════════════════════╝
 
 function toKwh(value) {
   if (value === undefined || value === null) return 0;
-
   const numericValue = Number(value);
-
-  if (numericValue > 1) {
-    return numericValue / 1000;
-  }
-
-  return numericValue;
+  return numericValue > 1 ? numericValue / 1000 : numericValue;
 }
 
 function formatPrice(value) {
@@ -29,9 +23,9 @@ function formatPrice(value) {
   return Number(value).toFixed(5);
 }
 
-// ======================
-// HELPERS · PRICE ENGINE
-// ======================
+// ╔════════════════════════════════════════════════════════════╗
+// ║ HELPERS · PRICE ENGINE                                                       ║
+// ╚════════════════════════════════════════════════════════════╝
 
 function buildHoursWithFinal(hoursData) {
   if (!hoursData?.hours || !hoursData?.date) return [];
@@ -47,9 +41,9 @@ function buildHoursWithFinal(hoursData) {
   });
 }
 
-// ======================
-// HELPERS · ANALYSIS
-// ======================
+// ╔════════════════════════════════════════════════════════════╗
+// ║ HELPERS · ANALYSIS                                                           ║
+// ╚════════════════════════════════════════════════════════════╝
 
 function buildDayAnalysis(hoursWithFinalPrice) {
   if (!hoursWithFinalPrice?.length) {
@@ -65,9 +59,6 @@ function buildDayAnalysis(hoursWithFinalPrice) {
   const total = hoursWithFinalPrice.reduce((sum, h) => sum + h.finalPrice, 0);
   const avg = total / hoursWithFinalPrice.length;
 
-  const min = Math.min(...hoursWithFinalPrice.map((h) => h.finalPrice));
-  const max = Math.max(...hoursWithFinalPrice.map((h) => h.finalPrice));
-
   const bestHour = hoursWithFinalPrice.reduce((best, current) =>
     current.finalPrice < best.finalPrice ? current : best
   );
@@ -78,8 +69,8 @@ function buildDayAnalysis(hoursWithFinalPrice) {
 
   return {
     avg,
-    min,
-    max,
+    min: bestHour.finalPrice,
+    max: worstHour.finalPrice,
     bestHour,
     worstHour,
   };
@@ -123,20 +114,16 @@ function buildPremiumConsumptionInsight(hoursWithFinalPrice) {
     if (b.length !== a.length) return b.length - a.length;
 
     const avgA =
-      a.reduce(
-        (sum, hour) =>
-          sum +
-          hoursWithFinalPrice.find((item) => item.hour === hour).finalPrice,
-        0
-      ) / a.length;
+      a.reduce((sum, hour) => {
+        const item = hoursWithFinalPrice.find((h) => h.hour === hour);
+        return sum + item.finalPrice;
+      }, 0) / a.length;
 
     const avgB =
-      b.reduce(
-        (sum, hour) =>
-          sum +
-          hoursWithFinalPrice.find((item) => item.hour === hour).finalPrice,
-        0
-      ) / b.length;
+      b.reduce((sum, hour) => {
+        const item = hoursWithFinalPrice.find((h) => h.hour === hour);
+        return sum + item.finalPrice;
+      }, 0) / b.length;
 
     return avgA - avgB;
   })[0];
@@ -195,23 +182,23 @@ function buildPremiumConsumptionInsight(hoursWithFinalPrice) {
   };
 }
 
-// ======================
-// COMPONENT · HOME
-// ======================
+// ╔════════════════════════════════════════════════════════════╗
+// ║ COMPONENT · HOME                                                             ║
+// ╚════════════════════════════════════════════════════════════╝
 
 function Home() {
-  // ======================
+  // ──────────────────────────────
   // STATE
-  // ======================
+  // ──────────────────────────────
 
   const [data, setData] = useState(null);
   const [hoursData, setHoursData] = useState(null);
   const [weather, setWeather] = useState(null);
   const [error, setError] = useState("");
 
-  // ======================
+  // ──────────────────────────────
   // EFFECTS
-  // ======================
+  // ──────────────────────────────
 
   useEffect(() => {
     async function loadData() {
@@ -242,9 +229,9 @@ function Home() {
     loadData();
   }, []);
 
-  // ======================
+  // ──────────────────────────────
   // MEMOS · DATE
-  // ======================
+  // ──────────────────────────────
 
   const formattedDate = useMemo(() => {
     if (!data?.date) return "";
@@ -257,31 +244,33 @@ function Home() {
     });
   }, [data]);
 
-  // ======================
+  // ──────────────────────────────
   // MEMOS · PRICES
-  // ======================
+  // ──────────────────────────────
 
   const hoursWithFinalPrice = useMemo(() => {
     return buildHoursWithFinal(hoursData);
   }, [hoursData]);
 
-  const { avgFinalKwh, minFinalKwh, maxFinalKwh } = useMemo(() => {
-    const analysis = buildDayAnalysis(hoursWithFinalPrice);
-
-    return {
-      avgFinalKwh: analysis.avg,
-      minFinalKwh: analysis.min,
-      maxFinalKwh: analysis.max,
-    };
+  const dayAnalysis = useMemo(() => {
+    return buildDayAnalysis(hoursWithFinalPrice);
   }, [hoursWithFinalPrice]);
 
   const premiumInsight = useMemo(() => {
     return buildPremiumConsumptionInsight(hoursWithFinalPrice);
   }, [hoursWithFinalPrice]);
 
-  // ======================
+const currentHourData = useMemo(() => {
+  if (!hoursWithFinalPrice?.length) return null;
+
+  const now = new Date().getHours() + 1;
+
+  return hoursWithFinalPrice.find((h) => h.hour === now);
+}, [hoursWithFinalPrice]);
+
+  // ──────────────────────────────
   // MEMOS · WEATHER
-  // ======================
+  // ──────────────────────────────
 
   const weatherCondition = weather?.energy?.condition;
 
@@ -295,6 +284,7 @@ function Home() {
     if (premiumInsight.dayType === "cheap") return "cheap";
     if (premiumInsight.dayType === "normal") return "medium";
     if (premiumInsight.dayType === "expensive") return "expensive";
+
     return "neutral";
   }, [premiumInsight, weatherCondition]);
 
@@ -334,9 +324,9 @@ function Home() {
     return premiumInsight.actionText;
   }, [premiumInsight, weatherCondition]);
 
-  // ======================
+  // ──────────────────────────────
   // RENDER · ERROR
-  // ======================
+  // ──────────────────────────────
 
   if (error) {
     return (
@@ -351,9 +341,9 @@ function Home() {
     );
   }
 
-  // ======================
+  // ──────────────────────────────
   // RENDER · LOADING
-  // ======================
+  // ──────────────────────────────
 
   if (!data || !hoursData) {
     return (
@@ -365,18 +355,24 @@ function Home() {
     );
   }
 
-  // ======================
-  // RENDER · MAIN
-  // ======================
+  // ╔════════════════════════════════════════════════════════════╗
+  // ║ RENDER · MAIN                                                                ║
+  // ╚════════════════════════════════════════════════════════════╝
 
   return (
     <div style={styles.page}>
       <div style={styles.phone}>
+        {/* ────────────────────────────── */}
+        {/* HEADER                        */}
+        {/* ────────────────────────────── */}
         <header style={styles.appHeader}>
           <div style={styles.appName}>Smart Energy</div>
           <div style={styles.appDate}>{formattedDate}</div>
         </header>
 
+        {/* ────────────────────────────── */}
+        {/* HERO                          */}
+        {/* ────────────────────────────── */}
         <section
           style={{
             ...homeStyles.heroCard,
@@ -405,11 +401,34 @@ function Home() {
           </div>
         </section>
 
+       {/* ────────────────────────────── */}
+       {/* CURRENT PRICE                 */}
+       {/* ────────────────────────────── */}
+       <section style={homeStyles.infoCard}>
+        <div style={homeStyles.infoTitle}>Ahora mismo</div>
+
+        {currentHourData ? (
+         <div style={homeStyles.infoText}>
+          {String(currentHourData.hour - 1).padStart(2, "0")}:00 -{" "}
+          {String(currentHourData.hour).padStart(2, "0")}:00 ·{" "}
+          {formatPrice(currentHourData.finalPrice)} €/kWh
+         </div>
+        ) : (
+          <div style={homeStyles.infoText}>No disponible</div>
+         )}
+        </section>
+
+        {/* ────────────────────────────── */}
+        {/* ACTION CARD                   */}
+        {/* ────────────────────────────── */}
         <section style={homeStyles.infoCard}>
           <div style={homeStyles.infoTitle}>Qué hacer hoy</div>
           <div style={homeStyles.infoText}>{premiumInsight.actionText}</div>
         </section>
 
+        {/* ────────────────────────────── */}
+        {/* WEATHER CARD                  */}
+        {/* ────────────────────────────── */}
         <section style={homeStyles.infoCard}>
           <div style={homeStyles.infoTitle}>
             {weatherIcon} {weatherTitle}
@@ -417,22 +436,31 @@ function Home() {
           <div style={homeStyles.infoText}>{weatherText}</div>
         </section>
 
+        {/* ────────────────────────────── */}
+        {/* METRICS                       */}
+        {/* ────────────────────────────── */}
         <section style={homeStyles.metricsGrid}>
           <div style={homeStyles.metricCard}>
             <div style={homeStyles.metricLabel}>Media</div>
-            <div style={homeStyles.metricValue}>{formatPrice(avgFinalKwh)}</div>
+            <div style={homeStyles.metricValue}>
+              {formatPrice(dayAnalysis.avg)}
+            </div>
             <div style={homeStyles.metricUnit}>€/kWh</div>
           </div>
 
           <div style={homeStyles.metricCard}>
-            <div style={homeStyles.metricLabel}>Mínimo</div>
-            <div style={homeStyles.metricValue}>{formatPrice(minFinalKwh)}</div>
+            <div style={homeStyles.metricLabel}>Hora más barata</div>
+            <div style={homeStyles.metricValue}>
+              {formatPrice(dayAnalysis.min)}
+            </div>
             <div style={homeStyles.metricUnit}>€/kWh</div>
           </div>
 
           <div style={homeStyles.metricCard}>
-            <div style={homeStyles.metricLabel}>Máximo</div>
-            <div style={homeStyles.metricValue}>{formatPrice(maxFinalKwh)}</div>
+            <div style={homeStyles.metricLabel}>Hora más cara</div>
+            <div style={homeStyles.metricValue}>
+              {formatPrice(dayAnalysis.max)}
+            </div>
             <div style={homeStyles.metricUnit}>€/kWh</div>
           </div>
         </section>
