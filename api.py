@@ -21,7 +21,7 @@ SOLAREDGE_SITE_ID = os.getenv("SOLAREDGE_SITE_ID")
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ DATABASE                                                                     ║
+# ║ DATABASE                                                               ║
 # ╚════════════════════════════════════════════════════════════╝
 
 def init_db():
@@ -45,7 +45,7 @@ def get_db_connection():
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ DATES                                                                        ║
+# ║ DATES                                                                  ║
 # ╚════════════════════════════════════════════════════════════╝
 
 def get_today_date():
@@ -57,7 +57,7 @@ def get_tomorrow_date():
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE DATA                                                                    ║
+# ║ OMIE DATA                                                              ║
 # ╚════════════════════════════════════════════════════════════╝
 
 def get_latest_day_row():
@@ -273,7 +273,7 @@ def build_price_days_history_payload(limit: int = 30):
     }
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ SOLAREDGE DATA                                                         ║
+# ║ SOLAREDGE DATA                                             ║
 # ╚════════════════════════════════════════════════════════════╝
 
 def fetch_solaredge(path: str, params: dict | None = None):
@@ -281,18 +281,15 @@ def fetch_solaredge(path: str, params: dict | None = None):
         params = {}
 
     if not SOLAREDGE_API_KEY or not SOLAREDGE_SITE_ID:
-        return {
-            "error": "Faltan SOLAREDGE_API_KEY o SOLAREDGE_SITE_ID"
-        }
+        return {"error": "Faltan SOLAREDGE_API_KEY o SOLAREDGE_SITE_ID"}
 
     url = f"https://monitoringapi.solaredge.com/site/{SOLAREDGE_SITE_ID}/{path}"
 
-    request_params = {
-        **params,
-        "api_key": SOLAREDGE_API_KEY,
-    }
-
-    response = requests.get(url, params=request_params, timeout=20)
+    response = requests.get(
+        url,
+        params={**params, "api_key": SOLAREDGE_API_KEY},
+        timeout=20,
+    )
 
     if response.status_code != 200:
         return {
@@ -302,6 +299,29 @@ def fetch_solaredge(path: str, params: dict | None = None):
         }
 
     return response.json()
+
+
+def sum_meter_values(meters, mapping):
+    result = {value: 0 for value in mapping.values()}
+
+    for meter in meters:
+        meter_type = meter.get("type")
+        key = mapping.get(meter_type)
+
+        if not key:
+            continue
+
+        values = meter.get("values", [])
+
+        total_wh = sum(
+            float(item.get("value") or 0)
+            for item in values
+            if item.get("value") is not None
+        )
+
+        result[key] = round(total_wh / 1000, 3)
+
+    return result
 
 
 def build_solaredge_current_payload():
@@ -322,69 +342,17 @@ def build_solaredge_current_payload():
     grid_kw = float(grid.get("currentPower", 0) or 0)
     storage_kw = float(storage.get("currentPower", 0) or 0)
 
+    excess_kw = max(production_kw - consumption_kw, 0)
+
     return {
         "productionPowerW": round(production_kw * 1000, 2),
         "consumptionPowerW": round(consumption_kw * 1000, 2),
+        "excessPowerW": round(excess_kw * 1000, 2),
         "balancePowerW": round((production_kw - consumption_kw) * 1000, 2),
         "gridPowerW": round(grid_kw * 1000, 2),
         "storagePowerW": round(storage_kw * 1000, 2),
         "raw": flow,
     }
-
-
-def build_solaredge_today_payload():
-    today = get_today_date()
-
-    data = fetch_solaredge(
-        "energyDetails",
-        {
-            "timeUnit": "DAY",
-            "startTime": f"{today} 00:00:00",
-            "endTime": f"{today} 23:59:59",
-            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
-        },
-    )
-
-    if data.get("error"):
-        return data
-
-    meters = data.get("energyDetails", {}).get("meters", [])
-
-    result = {
-        "date": today,
-        "productionKwh": 0,
-        "consumptionKwh": 0,
-        "selfConsumptionKwh": 0,
-        "feedInKwh": 0,
-        "purchasedKwh": 0,
-    }
-
-    mapping = {
-        "Production": "productionKwh",
-        "Consumption": "consumptionKwh",
-        "SelfConsumption": "selfConsumptionKwh",
-        "FeedIn": "feedInKwh",
-        "Purchased": "purchasedKwh",
-    }
-
-    for meter in meters:
-        meter_type = meter.get("type")
-        key = mapping.get(meter_type)
-
-        if not key:
-            continue
-
-        values = meter.get("values", [])
-
-        total_wh = sum(
-            float(item.get("value") or 0)
-            for item in values
-            if item.get("value") is not None
-        )
-
-        result[key] = round(total_wh / 1000, 3)
-
-    return result
 
 
 def floor_to_quarter(dt: datetime):
@@ -412,18 +380,6 @@ def build_solaredge_quarters_today_payload():
 
     meters = data.get("energyDetails", {}).get("meters", [])
 
-    result = {
-        "date": today,
-        "from": f"{today} 00:00:00",
-        "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        "productionKwhUntilNow": 0,
-        "consumptionKwhUntilNow": 0,
-        "selfConsumptionKwhUntilNow": 0,
-        "feedInKwhUntilNow": 0,
-        "purchasedKwhUntilNow": 0,
-        "intervalsCount": 0,
-    }
-
     mapping = {
         "Production": "productionKwhUntilNow",
         "Consumption": "consumptionKwhUntilNow",
@@ -432,30 +388,52 @@ def build_solaredge_quarters_today_payload():
         "Purchased": "purchasedKwhUntilNow",
     }
 
-    max_intervals = 0
-
-    for meter in meters:
-        meter_type = meter.get("type")
-        key = mapping.get(meter_type)
-
-        if not key:
-            continue
-
-        values = meter.get("values", [])
-        max_intervals = max(max_intervals, len(values))
-
-        total_wh = sum(
-            float(item.get("value") or 0)
-            for item in values
-            if item.get("value") is not None
-        )
-
-        result[key] = round(total_wh / 1000, 3)
-
-    result["intervalsCount"] = max_intervals
+    result = {
+        "date": today,
+        "from": f"{today} 00:00:00",
+        "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+        **sum_meter_values(meters, mapping),
+        "intervalsCount": max(
+            [len(meter.get("values", [])) for meter in meters] or [0]
+        ),
+    }
 
     return result
 
+
+def build_solaredge_month_payload():
+    now = datetime.now()
+    today = now.date().isoformat()
+    month_start = now.replace(day=1).date().isoformat()
+
+    data = fetch_solaredge(
+        "energyDetails",
+        {
+            "timeUnit": "DAY",
+            "startTime": f"{month_start} 00:00:00",
+            "endTime": f"{today} 23:59:59",
+            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
+        },
+    )
+
+    if data.get("error"):
+        return data
+
+    meters = data.get("energyDetails", {}).get("meters", [])
+
+    mapping = {
+        "Production": "productionKwhMonth",
+        "Consumption": "consumptionKwhMonth",
+        "SelfConsumption": "selfConsumptionKwhMonth",
+        "FeedIn": "feedInKwhMonth",
+        "Purchased": "purchasedKwhMonth",
+    }
+
+    return {
+        "from": f"{month_start} 00:00:00",
+        "to": f"{today} 23:59:59",
+        **sum_meter_values(meters, mapping),
+    }
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE ENDPOINTS                                                         ║
 # ╚════════════════════════════════════════════════════════════╝
@@ -499,13 +477,14 @@ def get_solaredge_current():
     return build_solaredge_current_payload()
 
 
-@app.get("/solar-edge/today")
-def get_solaredge_today():
-    return build_solaredge_today_payload()
-
 @app.get("/solar-edge/quarters-today")
 def get_solaredge_quarters_today():
     return build_solaredge_quarters_today_payload()
+
+
+@app.get("/solar-edge/month")
+def get_solaredge_month():
+    return build_solaredge_month_payload()
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE IMPORT ENDPOINTS                                                  ║
