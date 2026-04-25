@@ -4,6 +4,7 @@ import sqlite3
 import requests
 import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInf
 
 app = FastAPI()
 
@@ -271,9 +272,8 @@ def build_price_days_history_payload(limit: int = 30):
         ]
     }
 
-
 # ╔════════════════════════════════════════════════════════════╗
-# ║ SOLAREDGE DATA                                                               ║
+# ║ SOLAREDGE DATA                                                         ║
 # ╚════════════════════════════════════════════════════════════╝
 
 def fetch_solaredge(path: str, params: dict | None = None):
@@ -379,6 +379,7 @@ def build_solaredge_today_payload():
         total_wh = sum(
             float(item.get("value") or 0)
             for item in values
+            if item.get("value") is not None
         )
 
         result[key] = round(total_wh / 1000, 3)
@@ -386,8 +387,77 @@ def build_solaredge_today_payload():
     return result
 
 
+def floor_to_quarter(dt: datetime):
+    minute = (dt.minute // 15) * 15
+    return dt.replace(minute=minute, second=0, microsecond=0)
+
+
+def build_solaredge_quarters_today_payload():
+    now = datetime.now()
+    end_time = floor_to_quarter(now)
+    today = end_time.date().isoformat()
+
+    data = fetch_solaredge(
+        "energyDetails",
+        {
+            "timeUnit": "QUARTER_OF_AN_HOUR",
+            "startTime": f"{today} 00:00:00",
+            "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
+        },
+    )
+
+    if data.get("error"):
+        return data
+
+    meters = data.get("energyDetails", {}).get("meters", [])
+
+    result = {
+        "date": today,
+        "from": f"{today} 00:00:00",
+        "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "productionKwhUntilNow": 0,
+        "consumptionKwhUntilNow": 0,
+        "selfConsumptionKwhUntilNow": 0,
+        "feedInKwhUntilNow": 0,
+        "purchasedKwhUntilNow": 0,
+        "intervalsCount": 0,
+    }
+
+    mapping = {
+        "Production": "productionKwhUntilNow",
+        "Consumption": "consumptionKwhUntilNow",
+        "SelfConsumption": "selfConsumptionKwhUntilNow",
+        "FeedIn": "feedInKwhUntilNow",
+        "Purchased": "purchasedKwhUntilNow",
+    }
+
+    max_intervals = 0
+
+    for meter in meters:
+        meter_type = meter.get("type")
+        key = mapping.get(meter_type)
+
+        if not key:
+            continue
+
+        values = meter.get("values", [])
+        max_intervals = max(max_intervals, len(values))
+
+        total_wh = sum(
+            float(item.get("value") or 0)
+            for item in values
+            if item.get("value") is not None
+        )
+
+        result[key] = round(total_wh / 1000, 3)
+
+    result["intervalsCount"] = max_intervals
+
+    return result
+
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE ENDPOINTS                                                               ║
+# ║ OMIE ENDPOINTS                                                         ║
 # ╚════════════════════════════════════════════════════════════╝
 
 @app.get("/price-day/latest")
@@ -421,7 +491,7 @@ def get_price_days_history(limit: int = 30):
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ SOLAREDGE ENDPOINTS                                                          ║
+# ║ SOLAREDGE ENDPOINTS                                                    ║
 # ╚════════════════════════════════════════════════════════════╝
 
 @app.get("/solar-edge/current")
@@ -433,9 +503,12 @@ def get_solaredge_current():
 def get_solaredge_today():
     return build_solaredge_today_payload()
 
+@app.get("/solar-edge/quarters-today")
+def get_solaredge_quarters_today():
+    return build_solaredge_quarters_today_payload()
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE IMPORT ENDPOINTS                                                        ║
+# ║ OMIE IMPORT ENDPOINTS                                                  ║
 # ╚════════════════════════════════════════════════════════════╝
 
 @app.get("/import-omie")
