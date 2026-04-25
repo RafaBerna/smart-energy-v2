@@ -268,8 +268,10 @@ def build_price_days_history_payload(limit: int = 30):
 NEXUS_START_DATE = "2026-04-04"
 LOCAL_TZ = ZoneInfo("Europe/Madrid")
 
+
 def get_local_now():
     return datetime.now(LOCAL_TZ).replace(tzinfo=None)
+
 
 def fetch_solaredge(path: str, params: dict | None = None):
     if params is None:
@@ -295,29 +297,11 @@ def fetch_solaredge(path: str, params: dict | None = None):
 
     return response.json()
 
+
 def floor_to_quarter(dt: datetime):
     minute = (dt.minute // 15) * 15
     return dt.replace(minute=minute, second=0, microsecond=0)
 
-def sum_energy_details(meters, mapping):
-    result = {value: 0 for value in mapping.values()}
-
-    for meter in meters:
-        meter_type = meter.get("type")
-        key = mapping.get(meter_type)
-
-        if not key:
-            continue
-
-        total_wh = sum(
-            float(item.get("value") or 0)
-            for item in meter.get("values", [])
-            if item.get("value") is not None
-        )
-
-        result[key] = round(total_wh / 1000, 3)
-
-    return result
 
 def build_solaredge_current_payload():
     data = fetch_solaredge("currentPowerFlow")
@@ -349,75 +333,121 @@ def build_solaredge_current_payload():
         "raw": flow,
     }
 
+
+def calculate_power_accumulation(start_time: str, end_time: str):
+    data = fetch_solaredge(
+        "powerDetails",
+        {
+            "timeUnit": "QUARTER_OF_AN_HOUR",
+            "startTime": start_time,
+            "endTime": end_time,
+            "meters": "Production,Consumption,FeedIn",
+        },
+    )
+
+    if data.get("error"):
+        return data
+
+    meters = data.get("powerDetails", {}).get("meters", [])
+
+    series = {}
+
+    for meter in meters:
+        meter_type = meter.get("type")
+
+        for item in meter.get("values", []):
+            date = item.get("date")
+            value = item.get("value")
+
+            if not date or value is None:
+                continue
+
+            if date not in series:
+                series[date] = {
+                    "Production": 0,
+                    "Consumption": 0,
+                    "FeedIn": 0,
+                }
+
+            series[date][meter_type] = float(value)
+
+    production_kwh = 0
+    consumption_kwh = 0
+    feedin_kwh = 0
+    self_consumption_kwh = 0
+    purchased_kwh = 0
+
+    for values in series.values():
+        production_w = values.get("Production", 0)
+        consumption_w = values.get("Consumption", 0)
+        feedin_w = values.get("FeedIn", 0)
+
+        solar_used_w = max(production_w - feedin_w, 0)
+        grid_used_w = max(consumption_w - solar_used_w, 0)
+
+        production_kwh += production_w * 0.25 / 1000
+        consumption_kwh += consumption_w * 0.25 / 1000
+        feedin_kwh += feedin_w * 0.25 / 1000
+        self_consumption_kwh += solar_used_w * 0.25 / 1000
+        purchased_kwh += grid_used_w * 0.25 / 1000
+
+    return {
+        "production": round(production_kwh, 3),
+        "consumption": round(consumption_kwh, 3),
+        "self_consumption": round(self_consumption_kwh, 3),
+        "feedin": round(feedin_kwh, 3),
+        "purchased": round(purchased_kwh, 3),
+        "intervalsCount": len(series),
+    }
+
+
 def build_solaredge_quarters_today_payload():
     now = get_local_now()
     end_time = floor_to_quarter(now)
     today = end_time.date().isoformat()
 
-    data = fetch_solaredge(
-        "energyDetails",
-        {
-            "timeUnit": "QUARTER_OF_AN_HOUR",
-            "startTime": f"{today} 00:00:00",
-            "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
-        },
+    result = calculate_power_accumulation(
+        f"{today} 00:00:00",
+        end_time.strftime("%Y-%m-%d %H:%M:%S"),
     )
 
-    if data.get("error"):
-        return data
-
-    meters = data.get("energyDetails", {}).get("meters", [])
-
-    mapping = {
-        "Production": "productionKwhUntilNow",
-        "Consumption": "consumptionKwhUntilNow",
-        "SelfConsumption": "selfConsumptionKwhUntilNow",
-        "FeedIn": "feedInKwhUntilNow",
-        "Purchased": "purchasedKwhUntilNow",
-    }
+    if result.get("error"):
+        return result
 
     return {
         "date": today,
         "from": f"{today} 00:00:00",
         "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        **sum_energy_details(meters, mapping),
-        "intervalsCount": max(
-            [len(meter.get("values", [])) for meter in meters] or [0]
-        ),
+        "productionKwhUntilNow": result["production"],
+        "consumptionKwhUntilNow": result["consumption"],
+        "selfConsumptionKwhUntilNow": result["self_consumption"],
+        "feedInKwhUntilNow": result["feedin"],
+        "purchasedKwhUntilNow": result["purchased"],
+        "intervalsCount": result["intervalsCount"],
     }
+
 
 def build_solaredge_month_payload():
     now = get_local_now()
     end_time = floor_to_quarter(now)
 
-    data = fetch_solaredge(
-        "energyDetails",
-        {
-            "timeUnit": "DAY",
-            "startTime": f"{NEXUS_START_DATE} 00:00:00",
-            "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
-        },
+    result = calculate_power_accumulation(
+        f"{NEXUS_START_DATE} 00:00:00",
+        end_time.strftime("%Y-%m-%d %H:%M:%S"),
     )
 
-    if data.get("error"):
-        return data
-
-    meters = data.get("energyDetails", {}).get("meters", [])
-
-    mapping = {
-        "Production": "productionKwhMonth",
-        "Consumption": "consumptionKwhMonth",
-        "SelfConsumption": "selfConsumptionKwhMonth",
-        "FeedIn": "feedInKwhMonth",
-        "Purchased": "purchasedKwhMonth",
-    }
+    if result.get("error"):
+        return result
 
     return {
         "from": f"{NEXUS_START_DATE} 00:00:00",
         "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        **sum_energy_details(meters, mapping),
+        "productionKwhMonth": result["production"],
+        "consumptionKwhMonth": result["consumption"],
+        "selfConsumptionKwhMonth": result["self_consumption"],
+        "feedInKwhMonth": result["feedin"],
+        "purchasedKwhMonth": result["purchased"],
+        "intervalsCount": result["intervalsCount"],
     }
 
 # ╔════════════════════════════════════════════════════════════╗
