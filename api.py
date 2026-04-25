@@ -142,6 +142,9 @@ def fetch_solaredge(path: str, params: dict | None = None):
     if params is None:
         params = {}
 
+    if not SOLAREDGE_API_KEY or not SOLAREDGE_SITE_ID:
+        return {"error": "Faltan SOLAREDGE_API_KEY o SOLAREDGE_SITE_ID"}
+
     url = f"https://monitoringapi.solaredge.com/site/{SOLAREDGE_SITE_ID}/{path}"
 
     response = requests.get(
@@ -151,7 +154,11 @@ def fetch_solaredge(path: str, params: dict | None = None):
     )
 
     if response.status_code != 200:
-        return {"error": response.text}
+        return {
+            "error": "Error al consultar SolarEdge",
+            "status_code": response.status_code,
+            "detail": response.text,
+        }
 
     return response.json()
 
@@ -160,7 +167,7 @@ def floor_to_quarter(dt: datetime):
     return dt.replace(minute=(dt.minute // 15) * 15, second=0, microsecond=0)
 
 
-# 🔥 ACUMULADO DÍA REAL
+# 🔥 ACUMULADO DÍA REAL (FIABLE)
 
 def build_solaredge_quarters_today_payload():
     now = get_local_now()
@@ -168,51 +175,59 @@ def build_solaredge_quarters_today_payload():
     today = end_time.date().isoformat()
 
     data = fetch_solaredge(
-        "powerDetails",
+        "energyDetails",
         {
             "timeUnit": "QUARTER_OF_AN_HOUR",
             "startTime": f"{today} 00:00:00",
             "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "meters": "Production,Consumption,FeedIn,SelfConsumption",
+            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
         },
     )
 
     if data.get("error"):
         return data
 
-    meters = data.get("powerDetails", {}).get("meters", [])
+    meters = data.get("energyDetails", {}).get("meters", [])
 
     production = 0
     consumption = 0
-    feed = 0
     self_c = 0
+    feed = 0
+    purchased = 0
 
-    for m in meters:
-        for v in m.get("values", []):
-            val = float(v.get("value") or 0)
-            kwh = val * 0.25 / 1000
+    for meter in meters:
+        m_type = meter.get("type")
 
-            if m["type"] == "Production":
-                production += kwh
-            elif m["type"] == "Consumption":
-                consumption += kwh
-            elif m["type"] == "FeedIn":
-                feed += kwh
-            elif m["type"] == "SelfConsumption":
-                self_c += kwh
+        total = sum(
+            float(v.get("value") or 0)
+            for v in meter.get("values", [])
+            if v.get("value") is not None
+        )
 
-    # ✅ consumo real de red (clave)
-    grid = max(consumption - self_c, 0)
+        if m_type == "Production":
+            production = total
+        elif m_type == "Consumption":
+            consumption = total
+        elif m_type == "SelfConsumption":
+            self_c = total
+        elif m_type == "FeedIn":
+            feed = total
+        elif m_type == "Purchased":
+            purchased = total
 
     return {
         "date": today,
-        "productionKwhUntilNow": round(production, 3),
-        "consumptionKwhUntilNow": round(consumption, 3),
-        "selfConsumptionKwhUntilNow": round(self_c, 3),
-        "feedInKwhUntilNow": round(feed, 3),
-        "purchasedKwhUntilNow": round(grid, 3),
-    }
+        "from": f"{today} 00:00:00",
+        "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
 
+        "productionKwhUntilNow": round(production / 1000, 3),
+        "consumptionKwhUntilNow": round(consumption / 1000, 3),
+        "selfConsumptionKwhUntilNow": round(self_c / 1000, 3),
+        "feedInKwhUntilNow": round(feed / 1000, 3),
+
+        # 🔥 CONSUMO REAL DE RED
+        "purchasedKwhUntilNow": round(purchased / 1000, 3),
+    }
 # ╔════════════════════════════════════════════════════════════╗
 # ║ ENDPOINTS                                                  ║
 # ╚════════════════════════════════════════════════════════════╝
