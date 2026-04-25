@@ -127,7 +127,7 @@ def build_hour_rows(period_prices):
 
 
 def save_to_db(date_iso, period_prices, hour_rows):
-    conn = sqlite3.connect("database/omie.db")
+    conn = sqlite3.connect("/data/omie.db")
     cursor = conn.cursor()
 
     cursor.execute("""

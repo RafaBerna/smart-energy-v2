@@ -1,6 +1,6 @@
 // frontend/src/services/api.js
 
-const BASE_URL = "http://localhost:8000";
+const BASE_URL = "https://cooperative-insight-production-a160.up.railway.app";
 
 async function fetchJson(url, errorMessage) {
   const response = await fetch(url);
