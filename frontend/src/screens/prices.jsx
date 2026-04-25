@@ -145,7 +145,7 @@ function Prices() {
   // EFFECTS
   // ──────────────────────────────
 
-    useEffect(() => {
+  useEffect(() => {
     async function loadPrices() {
       try {
         setError("");
@@ -195,7 +195,7 @@ function Prices() {
     loadPrices();
   }, []);
 
-    useEffect(() => {
+  useEffect(() => {
     async function loadHistoryDate() {
       if (!selectedHistoryDate) return;
 
@@ -343,7 +343,6 @@ function Prices() {
     return historyDays.find((day) => day.date === selectedHistoryDate) || null;
   }, [historyDays, selectedHistoryDate]);
 
-
   // ──────────────────────────────
   // RENDER · ERROR
   // ──────────────────────────────
@@ -489,87 +488,101 @@ function Prices() {
             <section style={pricesStyles.pricesListCard}>
               <div style={pricesStyles.pricesListTitle}>Precio por hora</div>
 
-              <div style={pricesStyles.pricesList}>
-                {hoursWithFinal.map((h) => {
-                  const toneStyle = pricesStyles.getToneValueStyle(h.finalPrice);
-                  const quarters = periodsByHour[h.hour] || [];
-                  const isExpanded = expandedHour === h.hour;
-                  const canExpand = quarters.length > 0;
+              {hoursWithFinal.length === 0 ? (
+                <div style={pricesStyles.emptyMessage}>
+                  Aún no hay datos disponibles para este día
+                </div>
+              ) : (
+                <div style={pricesStyles.pricesList}>
+                  {hoursWithFinal.map((h) => {
+                    const toneStyle = pricesStyles.getToneValueStyle(
+                      h.finalPrice
+                    );
+                    const quarters = periodsByHour[h.hour] || [];
+                    const isExpanded = expandedHour === h.hour;
+                    const canExpand = quarters.length > 0;
 
-                  return (
-                    <div key={h.hour} style={pricesStyles.priceBlock}>
-                      {/* ────────────────────────────── */}
-                      {/* PRICE ROW                     */}
-                      {/* ────────────────────────────── */}
-                      <div
-                        style={{
-                          ...pricesStyles.priceRow,
-                          ...(canExpand ? pricesStyles.priceRowClickable : {}),
-                          ...pricesStyles.getToneRowAccentStyle(h.finalPrice),
-                          ...(isExpanded ? pricesStyles.priceRowHover : {}),
-                        }}
-                        onClick={() => {
-                          if (!canExpand) return;
-                          setExpandedHour(isExpanded ? null : h.hour);
-                        }}
-                      >
-                        <div style={pricesStyles.priceRowHour}>
-                          {formatHour(h.hour)}
-                        </div>
+                    return (
+                      <div key={h.hour} style={pricesStyles.priceBlock}>
+                        {/* ────────────────────────────── */}
+                        {/* PRICE ROW                     */}
+                        {/* ────────────────────────────── */}
+                        <div
+                          style={{
+                            ...pricesStyles.priceRow,
+                            ...(canExpand
+                              ? pricesStyles.priceRowClickable
+                              : {}),
+                            ...pricesStyles.getToneRowAccentStyle(h.finalPrice),
+                            ...(isExpanded ? pricesStyles.priceRowHover : {}),
+                          }}
+                          onClick={() => {
+                            if (!canExpand) return;
+                            setExpandedHour(isExpanded ? null : h.hour);
+                          }}
+                        >
+                          <div style={pricesStyles.priceRowHour}>
+                            {formatHour(h.hour)}
+                          </div>
 
-                        <div style={pricesStyles.priceRowActions}>
-                          <div style={pricesStyles.priceRowRight}>
-                            <div style={pricesStyles.priceMetaRow}>
-                              <div style={pricesStyles.priceMetaLabel}>OMIE</div>
-                              <div style={pricesStyles.priceOmie}>
-                                {formatPrice(h.omiePrice)} €/kWh
+                          <div style={pricesStyles.priceRowActions}>
+                            <div style={pricesStyles.priceRowRight}>
+                              <div style={pricesStyles.priceMetaRow}>
+                                <div style={pricesStyles.priceMetaLabel}>
+                                  OMIE
+                                </div>
+                                <div style={pricesStyles.priceOmie}>
+                                  {formatPrice(h.omiePrice)} €/kWh
+                                </div>
+                              </div>
+
+                              <div style={pricesStyles.priceMetaRow}>
+                                <div style={pricesStyles.priceMetaLabel}>
+                                  Final
+                                </div>
+                                <div
+                                  style={{
+                                    ...pricesStyles.priceFinal,
+                                    ...toneStyle,
+                                  }}
+                                >
+                                  {formatPrice(h.finalPrice)} €/kWh
+                                </div>
                               </div>
                             </div>
 
-                            <div style={pricesStyles.priceMetaRow}>
-                              <div style={pricesStyles.priceMetaLabel}>Final</div>
+                            <div style={pricesStyles.priceExpand}>
+                              {canExpand ? (isExpanded ? "−" : "+") : ""}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ────────────────────────────── */}
+                        {/* PERIODS DROPDOWN              */}
+                        {/* ────────────────────────────── */}
+                        {isExpanded && canExpand && (
+                          <div style={pricesStyles.periodsPanel}>
+                            {quarters.map((q) => (
                               <div
-                                style={{
-                                  ...pricesStyles.priceFinal,
-                                  ...toneStyle,
-                                }}
+                                key={`${h.hour}-${q.period}`}
+                                style={pricesStyles.periodRow}
                               >
-                                {formatPrice(h.finalPrice)} €/kWh
-                              </div>
-                            </div>
-                          </div>
+                                <div style={pricesStyles.periodLabel}>
+                                  {formatPeriod(q.period)}
+                                </div>
 
-                          <div style={pricesStyles.priceExpand}>
-                            {canExpand ? (isExpanded ? "−" : "+") : ""}
+                                <div style={pricesStyles.periodValue}>
+                                  {formatPrice(toKwh(q.price))} €/kWh
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        </div>
+                        )}
                       </div>
-
-                      {/* ────────────────────────────── */}
-                      {/* PERIODS DROPDOWN              */}
-                      {/* ────────────────────────────── */}
-                      {isExpanded && canExpand && (
-                        <div style={pricesStyles.periodsPanel}>
-                          {quarters.map((q) => (
-                            <div
-                              key={`${h.hour}-${q.period}`}
-                              style={pricesStyles.periodRow}
-                            >
-                              <div style={pricesStyles.periodLabel}>
-                                {formatPeriod(q.period)}
-                              </div>
-
-                              <div style={pricesStyles.periodValue}>
-                                {formatPrice(toKwh(q.price))} €/kWh
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </section>
           </>
         )}
@@ -587,7 +600,9 @@ function Prices() {
                 style={{
                   ...pricesStyles.quickCard,
                   ...(tomorrowBestHour
-                    ? pricesStyles.getToneBorderStyle(tomorrowBestHour.finalPrice)
+                    ? pricesStyles.getToneBorderStyle(
+                        tomorrowBestHour.finalPrice
+                      )
                     : {}),
                 }}
               >
@@ -599,7 +614,9 @@ function Prices() {
                   style={{
                     ...pricesStyles.quickCardPrice,
                     ...(tomorrowBestHour
-                      ? pricesStyles.getToneValueStyle(tomorrowBestHour.finalPrice)
+                      ? pricesStyles.getToneValueStyle(
+                          tomorrowBestHour.finalPrice
+                        )
                       : {}),
                   }}
                 >
@@ -613,7 +630,9 @@ function Prices() {
                 style={{
                   ...pricesStyles.quickCard,
                   ...(tomorrowWorstHour
-                    ? pricesStyles.getToneBorderStyle(tomorrowWorstHour.finalPrice)
+                    ? pricesStyles.getToneBorderStyle(
+                        tomorrowWorstHour.finalPrice
+                      )
                     : {}),
                 }}
               >
@@ -625,7 +644,9 @@ function Prices() {
                   style={{
                     ...pricesStyles.quickCardPrice,
                     ...(tomorrowWorstHour
-                      ? pricesStyles.getToneValueStyle(tomorrowWorstHour.finalPrice)
+                      ? pricesStyles.getToneValueStyle(
+                          tomorrowWorstHour.finalPrice
+                        )
                       : {}),
                   }}
                 >
@@ -642,87 +663,101 @@ function Prices() {
             <section style={pricesStyles.pricesListCard}>
               <div style={pricesStyles.pricesListTitle}>Precio por hora</div>
 
-              <div style={pricesStyles.pricesList}>
-                {tomorrowHoursWithFinal.map((h) => {
-                  const toneStyle = pricesStyles.getToneValueStyle(h.finalPrice);
-                  const quarters = tomorrowPeriodsByHour[h.hour] || [];
-                  const isExpanded = expandedHour === h.hour;
-                  const canExpand = quarters.length > 0;
+              {tomorrowHoursWithFinal.length === 0 ? (
+                <div style={pricesStyles.emptyMessage}>
+                  Aún no hay datos de mañana
+                </div>
+              ) : (
+                <div style={pricesStyles.pricesList}>
+                  {tomorrowHoursWithFinal.map((h) => {
+                    const toneStyle = pricesStyles.getToneValueStyle(
+                      h.finalPrice
+                    );
+                    const quarters = tomorrowPeriodsByHour[h.hour] || [];
+                    const isExpanded = expandedHour === h.hour;
+                    const canExpand = quarters.length > 0;
 
-                  return (
-                    <div key={h.hour} style={pricesStyles.priceBlock}>
-                      {/* ────────────────────────────── */}
-                      {/* PRICE ROW                     */}
-                      {/* ────────────────────────────── */}
-                      <div
-                        style={{
-                          ...pricesStyles.priceRow,
-                          ...(canExpand ? pricesStyles.priceRowClickable : {}),
-                          ...pricesStyles.getToneRowAccentStyle(h.finalPrice),
-                          ...(isExpanded ? pricesStyles.priceRowHover : {}),
-                        }}
-                        onClick={() => {
-                          if (!canExpand) return;
-                          setExpandedHour(isExpanded ? null : h.hour);
-                        }}
-                      >
-                        <div style={pricesStyles.priceRowHour}>
-                          {formatHour(h.hour)}
-                        </div>
+                    return (
+                      <div key={h.hour} style={pricesStyles.priceBlock}>
+                        {/* ────────────────────────────── */}
+                        {/* PRICE ROW                     */}
+                        {/* ────────────────────────────── */}
+                        <div
+                          style={{
+                            ...pricesStyles.priceRow,
+                            ...(canExpand
+                              ? pricesStyles.priceRowClickable
+                              : {}),
+                            ...pricesStyles.getToneRowAccentStyle(h.finalPrice),
+                            ...(isExpanded ? pricesStyles.priceRowHover : {}),
+                          }}
+                          onClick={() => {
+                            if (!canExpand) return;
+                            setExpandedHour(isExpanded ? null : h.hour);
+                          }}
+                        >
+                          <div style={pricesStyles.priceRowHour}>
+                            {formatHour(h.hour)}
+                          </div>
 
-                        <div style={pricesStyles.priceRowActions}>
-                          <div style={pricesStyles.priceRowRight}>
-                            <div style={pricesStyles.priceMetaRow}>
-                              <div style={pricesStyles.priceMetaLabel}>OMIE</div>
-                              <div style={pricesStyles.priceOmie}>
-                                {formatPrice(h.omiePrice)} €/kWh
+                          <div style={pricesStyles.priceRowActions}>
+                            <div style={pricesStyles.priceRowRight}>
+                              <div style={pricesStyles.priceMetaRow}>
+                                <div style={pricesStyles.priceMetaLabel}>
+                                  OMIE
+                                </div>
+                                <div style={pricesStyles.priceOmie}>
+                                  {formatPrice(h.omiePrice)} €/kWh
+                                </div>
+                              </div>
+
+                              <div style={pricesStyles.priceMetaRow}>
+                                <div style={pricesStyles.priceMetaLabel}>
+                                  Final
+                                </div>
+                                <div
+                                  style={{
+                                    ...pricesStyles.priceFinal,
+                                    ...toneStyle,
+                                  }}
+                                >
+                                  {formatPrice(h.finalPrice)} €/kWh
+                                </div>
                               </div>
                             </div>
 
-                            <div style={pricesStyles.priceMetaRow}>
-                              <div style={pricesStyles.priceMetaLabel}>Final</div>
+                            <div style={pricesStyles.priceExpand}>
+                              {canExpand ? (isExpanded ? "−" : "+") : ""}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ────────────────────────────── */}
+                        {/* PERIODS DROPDOWN              */}
+                        {/* ────────────────────────────── */}
+                        {isExpanded && canExpand && (
+                          <div style={pricesStyles.periodsPanel}>
+                            {quarters.map((q) => (
                               <div
-                                style={{
-                                  ...pricesStyles.priceFinal,
-                                  ...toneStyle,
-                                }}
+                                key={`${h.hour}-${q.period}`}
+                                style={pricesStyles.periodRow}
                               >
-                                {formatPrice(h.finalPrice)} €/kWh
-                              </div>
-                            </div>
-                          </div>
+                                <div style={pricesStyles.periodLabel}>
+                                  {formatPeriod(q.period)}
+                                </div>
 
-                          <div style={pricesStyles.priceExpand}>
-                            {canExpand ? (isExpanded ? "−" : "+") : ""}
+                                <div style={pricesStyles.periodValue}>
+                                  {formatPrice(toKwh(q.price))} €/kWh
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        </div>
+                        )}
                       </div>
-
-                      {/* ────────────────────────────── */}
-                      {/* PERIODS DROPDOWN              */}
-                      {/* ────────────────────────────── */}
-                      {isExpanded && canExpand && (
-                        <div style={pricesStyles.periodsPanel}>
-                          {quarters.map((q) => (
-                            <div
-                              key={`${h.hour}-${q.period}`}
-                              style={pricesStyles.periodRow}
-                            >
-                              <div style={pricesStyles.periodLabel}>
-                                {formatPeriod(q.period)}
-                              </div>
-
-                              <div style={pricesStyles.periodValue}>
-                                {formatPrice(toKwh(q.price))} €/kWh
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </section>
           </>
         )}
@@ -756,12 +791,12 @@ function Prices() {
                     <div
                       style={{
                         ...pricesStyles.priceRow,
-                        ...pricesStyles.getToneRowAccentStyle(selectedHistoryDay.avg_price),
+                        ...pricesStyles.getToneRowAccentStyle(
+                          selectedHistoryDay.avg_price
+                        ),
                       }}
                     >
-                      <div style={pricesStyles.priceRowHour}>
-                        Resumen
-                      </div>
+                      <div style={pricesStyles.priceRowHour}>Resumen</div>
 
                       <div style={pricesStyles.priceRowRight}>
                         <div style={pricesStyles.priceMetaRow}>
@@ -776,7 +811,9 @@ function Prices() {
                           <div
                             style={{
                               ...pricesStyles.priceFinal,
-                              ...pricesStyles.getToneValueStyle(selectedHistoryDay.avg_price),
+                              ...pricesStyles.getToneValueStyle(
+                                selectedHistoryDay.avg_price
+                              ),
                             }}
                           >
                             {formatPrice(selectedHistoryDay.avg_price)} €/kWh
@@ -799,81 +836,95 @@ function Prices() {
             <section style={pricesStyles.pricesListCard}>
               <div style={pricesStyles.pricesListTitle}>Precio por hora</div>
 
-              <div style={pricesStyles.pricesList}>
-                {historyHoursWithFinal.map((h) => {
-                  const toneStyle = pricesStyles.getToneValueStyle(h.finalPrice);
-                  const quarters = historyPeriodsByHour[h.hour] || [];
-                  const isExpanded = expandedHour === h.hour;
-                  const canExpand = quarters.length > 0;
+              {historyHoursWithFinal.length === 0 ? (
+                <div style={pricesStyles.emptyMessage}>
+                  No hay datos disponibles para esta fecha
+                </div>
+              ) : (
+                <div style={pricesStyles.pricesList}>
+                  {historyHoursWithFinal.map((h) => {
+                    const toneStyle = pricesStyles.getToneValueStyle(
+                      h.finalPrice
+                    );
+                    const quarters = historyPeriodsByHour[h.hour] || [];
+                    const isExpanded = expandedHour === h.hour;
+                    const canExpand = quarters.length > 0;
 
-                  return (
-                    <div key={h.hour} style={pricesStyles.priceBlock}>
-                      <div
-                        style={{
-                          ...pricesStyles.priceRow,
-                          ...(canExpand ? pricesStyles.priceRowClickable : {}),
-                          ...pricesStyles.getToneRowAccentStyle(h.finalPrice),
-                          ...(isExpanded ? pricesStyles.priceRowHover : {}),
-                        }}
-                        onClick={() => {
-                          if (!canExpand) return;
-                          setExpandedHour(isExpanded ? null : h.hour);
-                        }}
-                      >
-                        <div style={pricesStyles.priceRowHour}>
-                          {formatHour(h.hour)}
-                        </div>
+                    return (
+                      <div key={h.hour} style={pricesStyles.priceBlock}>
+                        <div
+                          style={{
+                            ...pricesStyles.priceRow,
+                            ...(canExpand
+                              ? pricesStyles.priceRowClickable
+                              : {}),
+                            ...pricesStyles.getToneRowAccentStyle(h.finalPrice),
+                            ...(isExpanded ? pricesStyles.priceRowHover : {}),
+                          }}
+                          onClick={() => {
+                            if (!canExpand) return;
+                            setExpandedHour(isExpanded ? null : h.hour);
+                          }}
+                        >
+                          <div style={pricesStyles.priceRowHour}>
+                            {formatHour(h.hour)}
+                          </div>
 
-                        <div style={pricesStyles.priceRowActions}>
-                          <div style={pricesStyles.priceRowRight}>
-                            <div style={pricesStyles.priceMetaRow}>
-                              <div style={pricesStyles.priceMetaLabel}>OMIE</div>
-                              <div style={pricesStyles.priceOmie}>
-                                {formatPrice(h.omiePrice)} €/kWh
+                          <div style={pricesStyles.priceRowActions}>
+                            <div style={pricesStyles.priceRowRight}>
+                              <div style={pricesStyles.priceMetaRow}>
+                                <div style={pricesStyles.priceMetaLabel}>
+                                  OMIE
+                                </div>
+                                <div style={pricesStyles.priceOmie}>
+                                  {formatPrice(h.omiePrice)} €/kWh
+                                </div>
+                              </div>
+
+                              <div style={pricesStyles.priceMetaRow}>
+                                <div style={pricesStyles.priceMetaLabel}>
+                                  Final
+                                </div>
+                                <div
+                                  style={{
+                                    ...pricesStyles.priceFinal,
+                                    ...toneStyle,
+                                  }}
+                                >
+                                  {formatPrice(h.finalPrice)} €/kWh
+                                </div>
                               </div>
                             </div>
 
-                            <div style={pricesStyles.priceMetaRow}>
-                              <div style={pricesStyles.priceMetaLabel}>Final</div>
+                            <div style={pricesStyles.priceExpand}>
+                              {canExpand ? (isExpanded ? "−" : "+") : ""}
+                            </div>
+                          </div>
+                        </div>
+
+                        {isExpanded && canExpand && (
+                          <div style={pricesStyles.periodsPanel}>
+                            {quarters.map((q) => (
                               <div
-                                style={{
-                                  ...pricesStyles.priceFinal,
-                                  ...toneStyle,
-                                }}
+                                key={`${h.hour}-${q.period}`}
+                                style={pricesStyles.periodRow}
                               >
-                                {formatPrice(h.finalPrice)} €/kWh
-                              </div>
-                            </div>
-                          </div>
+                                <div style={pricesStyles.periodLabel}>
+                                  {formatPeriod(q.period)}
+                                </div>
 
-                          <div style={pricesStyles.priceExpand}>
-                            {canExpand ? (isExpanded ? "−" : "+") : ""}
+                                <div style={pricesStyles.periodValue}>
+                                  {formatPrice(toKwh(q.price))} €/kWh
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        </div>
+                        )}
                       </div>
-
-                      {isExpanded && canExpand && (
-                        <div style={pricesStyles.periodsPanel}>
-                          {quarters.map((q) => (
-                            <div
-                              key={`${h.hour}-${q.period}`}
-                              style={pricesStyles.periodRow}
-                            >
-                              <div style={pricesStyles.periodLabel}>
-                                {formatPeriod(q.period)}
-                              </div>
-
-                              <div style={pricesStyles.periodValue}>
-                                {formatPrice(toKwh(q.price))} €/kWh
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </section>
           </>
         )}

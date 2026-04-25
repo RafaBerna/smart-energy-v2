@@ -32,6 +32,7 @@ export const pricesStyles = {
     fontSize: 14,
     opacity: 0.72,
     marginBottom: 12,
+    textAlign: "center",
   },
 
   // ======================
@@ -231,6 +232,18 @@ export const pricesStyles = {
     opacity: 0.9,
     flexShrink: 0,
   },
+emptyMessage: {
+  textAlign: "center",
+  color: "#94a3b8",
+  fontSize: 14,
+  padding: "20px 8px",
+},
+  emptyMessage: {
+    textAlign: "center",
+    color: "#94a3b8",
+    fontSize: 14,
+    padding: "20px 8px",
+   },
 
   // ======================
   // PERIODS

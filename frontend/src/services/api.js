@@ -97,3 +97,26 @@ export function fetchPriceDaysHistory(limit = 30) {
     "No se pudo cargar el histórico de precios"
   );
 }
+
+// --- SOLAREDGE ---
+
+export function fetchSolarEdgeCurrent() {
+  return fetchJson(
+    `${BASE_URL}/solar-edge/current`,
+    "No se pudo cargar el estado actual de SolarEdge"
+  );
+}
+
+export function fetchSolarEdgeQuartersToday() {
+  return fetchJson(
+    `${BASE_URL}/solar-edge/quarters-today`,
+    "No se pudo cargar el acumulado diario de SolarEdge"
+  );
+}
+
+export function fetchSolarEdgeMonth() {
+  return fetchJson(
+    `${BASE_URL}/solar-edge/month`,
+    "No se pudo cargar el acumulado mensual de SolarEdge"
+  );
+}

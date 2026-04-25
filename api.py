@@ -173,7 +173,7 @@ def build_solaredge_quarters_today_payload():
             "timeUnit": "QUARTER_OF_AN_HOUR",
             "startTime": f"{today} 00:00:00",
             "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "meters": "Production,Consumption,FeedIn,SelfConsumption,GRID",
+            "meters": "Production,Consumption,FeedIn,SelfConsumption",
         },
     )
 
@@ -186,7 +186,6 @@ def build_solaredge_quarters_today_payload():
     consumption = 0
     feed = 0
     self_c = 0
-    grid = 0
 
     for m in meters:
         for v in m.get("values", []):
@@ -201,9 +200,9 @@ def build_solaredge_quarters_today_payload():
                 feed += kwh
             elif m["type"] == "SelfConsumption":
                 self_c += kwh
-            elif m["type"] == "GRID":
-                if val > 0:
-                    grid += kwh
+
+    # ✅ consumo real de red (clave)
+    grid = max(consumption - self_c, 0)
 
     return {
         "date": today,
@@ -213,7 +212,6 @@ def build_solaredge_quarters_today_payload():
         "feedInKwhUntilNow": round(feed, 3),
         "purchasedKwhUntilNow": round(grid, 3),
     }
-
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ ENDPOINTS                                                  ║

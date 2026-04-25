@@ -5,11 +5,13 @@ import { calculateFinalPricePerKwh } from "../lib/tariffs";
 import {
   fetchLatestPriceDay,
   fetchLatestHours,
-  fetchWeatherByLocation,
+  fetchSolarEdgeCurrent,
+  fetchSolarEdgeQuartersToday,
+  fetchSolarEdgeMonth,
 } from "../services/api";
 
 // ╔════════════════════════════════════════════════════════════╗
-// ║ HELPERS · FORMATTERS                                                         ║
+// ║ HELPERS                                                    ║
 // ╚════════════════════════════════════════════════════════════╝
 
 function toKwh(value) {
@@ -18,13 +20,23 @@ function toKwh(value) {
   return numericValue > 1 ? numericValue / 1000 : numericValue;
 }
 
+function toKw(value) {
+  if (value === undefined || value === null) return 0;
+  return Number(value) / 1000;
+}
+
 function formatPrice(value) {
   if (value === undefined || value === null) return "0.00000";
   return Number(value).toFixed(5);
 }
 
+function formatEnergy(value) {
+  if (value === undefined || value === null) return "0.00";
+  return Number(value).toFixed(2);
+}
+
 // ╔════════════════════════════════════════════════════════════╗
-// ║ HELPERS · PRICE ENGINE                                                       ║
+// ║ PRICE ENGINE                                               ║
 // ╚════════════════════════════════════════════════════════════╝
 
 function buildHoursWithFinal(hoursData) {
@@ -42,185 +54,56 @@ function buildHoursWithFinal(hoursData) {
 }
 
 // ╔════════════════════════════════════════════════════════════╗
-// ║ HELPERS · ANALYSIS                                                           ║
+// ║ SOLAREDGE ENGINE                                           ║
 // ╚════════════════════════════════════════════════════════════╝
 
-function buildDayAnalysis(hoursWithFinalPrice) {
-  if (!hoursWithFinalPrice?.length) {
-    return {
-      avg: 0,
-      min: 0,
-      max: 0,
-      bestHour: null,
-      worstHour: null,
-    };
+function getRealtimeMessage(excessKw, currentPrice) {
+  if (excessKw >= 2) {
+    return `Puedes añadir hasta ${formatEnergy(excessKw)} kW sin comprar red.`;
   }
 
-  const total = hoursWithFinalPrice.reduce((sum, h) => sum + h.finalPrice, 0);
-  const avg = total / hoursWithFinalPrice.length;
-
-  const bestHour = hoursWithFinalPrice.reduce((best, current) =>
-    current.finalPrice < best.finalPrice ? current : best
-  );
-
-  const worstHour = hoursWithFinalPrice.reduce((worst, current) =>
-    current.finalPrice > worst.finalPrice ? current : worst
-  );
-
-  return {
-    avg,
-    min: bestHour.finalPrice,
-    max: worstHour.finalPrice,
-    bestHour,
-    worstHour,
-  };
-}
-
-function buildPremiumConsumptionInsight(hoursWithFinalPrice) {
-  if (!hoursWithFinalPrice?.length) {
-    return {
-      headline: "",
-      subheadline: "",
-      bestWindow: null,
-      dayType: "neutral",
-      actionText: "",
-    };
+  if (excessKw >= 0.5) {
+    return `Tienes ${formatEnergy(excessKw)} kW disponibles. Bien para consumos moderados.`;
   }
 
-  const sortedHours = [...hoursWithFinalPrice].sort(
-    (a, b) => a.finalPrice - b.finalPrice
-  );
-
-  const cheapestHours = sortedHours
-    .slice(0, 4)
-    .map((item) => item.hour)
-    .sort((a, b) => a - b);
-
-  const grouped = [];
-  let currentGroup = [cheapestHours[0]];
-
-  for (let i = 1; i < cheapestHours.length; i++) {
-    if (cheapestHours[i] === cheapestHours[i - 1] + 1) {
-      currentGroup.push(cheapestHours[i]);
-    } else {
-      grouped.push(currentGroup);
-      currentGroup = [cheapestHours[i]];
-    }
+  if (currentPrice <= 0.1) {
+    return "Hay poco excedente, pero la red está barata.";
   }
 
-  grouped.push(currentGroup);
-
-  const bestGroup = grouped.sort((a, b) => {
-    if (b.length !== a.length) return b.length - a.length;
-
-    const avgA =
-      a.reduce((sum, hour) => {
-        const item = hoursWithFinalPrice.find((h) => h.hour === hour);
-        return sum + item.finalPrice;
-      }, 0) / a.length;
-
-    const avgB =
-      b.reduce((sum, hour) => {
-        const item = hoursWithFinalPrice.find((h) => h.hour === hour);
-        return sum + item.finalPrice;
-      }, 0) / b.length;
-
-    return avgA - avgB;
-  })[0];
-
-  const startHour = bestGroup[0];
-  const endHour = bestGroup[bestGroup.length - 1];
-
-  const bestWindow = {
-    startHour,
-    endHour,
-    label: `${String(startHour - 1).padStart(2, "0")}:00 - ${String(
-      endHour
-    ).padStart(2, "0")}:00`,
-  };
-
-  const analysis = buildDayAnalysis(hoursWithFinalPrice);
-  const range = analysis.max - analysis.min;
-
-  if (range < 0.02) {
-    return {
-      headline: "Hoy el precio está bastante estable",
-      subheadline: "No hace falta obsesionarse con la hora",
-      bestWindow,
-      dayType: "stable",
-      actionText:
-        "Si puedes, concentra consumo en las horas centrales más cómodas del día.",
-    };
-  }
-
-  if (analysis.avg <= 0.1) {
-    return {
-      headline: "Hoy conviene consumir",
-      subheadline: "Aprovecha la mejor franja del día",
-      bestWindow,
-      dayType: "cheap",
-      actionText: `Pon lavadora, lavavajillas o consumos fuertes entre ${bestWindow.label}.`,
-    };
-  }
-
-  if (analysis.avg <= 0.16) {
-    return {
-      headline: "Hoy conviene elegir bien la hora",
-      subheadline: "Hay una franja claramente mejor",
-      bestWindow,
-      dayType: "normal",
-      actionText: `Si puedes mover consumo, hazlo entre ${bestWindow.label}.`,
-    };
-  }
-
-  return {
-    headline: "Hoy mejor vigilar el consumo",
-    subheadline: "Hay pocas horas realmente aprovechables",
-    bestWindow,
-    dayType: "expensive",
-    actionText: `Evita consumos fuertes fuera de ${bestWindow.label}.`,
-  };
+  return "No hay excedente claro. Mejor evitar consumos fuertes.";
 }
 
 // ╔════════════════════════════════════════════════════════════╗
-// ║ COMPONENT · HOME                                                             ║
+// ║ COMPONENT                                                  ║
 // ╚════════════════════════════════════════════════════════════╝
 
 function Home() {
-  // ──────────────────────────────
-  // STATE
-  // ──────────────────────────────
-
   const [data, setData] = useState(null);
   const [hoursData, setHoursData] = useState(null);
-  const [weather, setWeather] = useState(null);
+  const [solarCurrent, setSolarCurrent] = useState(null);
+  const [solarDay, setSolarDay] = useState(null);
+  const [solarMonth, setSolarMonth] = useState(null);
   const [error, setError] = useState("");
-
-  // ──────────────────────────────
-  // EFFECTS
-  // ──────────────────────────────
 
   useEffect(() => {
     async function loadData() {
       try {
         setError("");
 
-        const location = "Sant Sadurní d'Anoia";
-
-        const [day, hours] = await Promise.all([
-          fetchLatestPriceDay(),
-          fetchLatestHours(),
-        ]);
+        const [day, hours, current, accumulatedDay, accumulatedMonth] =
+          await Promise.all([
+            fetchLatestPriceDay(),
+            fetchLatestHours(),
+            fetchSolarEdgeCurrent().catch(() => null),
+            fetchSolarEdgeQuartersToday().catch(() => null),
+            fetchSolarEdgeMonth().catch(() => null),
+          ]);
 
         setData(day);
         setHoursData(hours);
-
-        try {
-          const weatherData = await fetchWeatherByLocation(location);
-          setWeather(weatherData);
-        } catch {
-          setWeather(null);
-        }
+        setSolarCurrent(current);
+        setSolarDay(accumulatedDay);
+        setSolarMonth(accumulatedMonth);
       } catch (err) {
         setError(err.message || "Error inesperado");
       }
@@ -228,10 +111,6 @@ function Home() {
 
     loadData();
   }, []);
-
-  // ──────────────────────────────
-  // MEMOS · DATE
-  // ──────────────────────────────
 
   const formattedDate = useMemo(() => {
     if (!data?.date) return "";
@@ -244,89 +123,25 @@ function Home() {
     });
   }, [data]);
 
-  // ──────────────────────────────
-  // MEMOS · PRICES
-  // ──────────────────────────────
-
   const hoursWithFinalPrice = useMemo(() => {
     return buildHoursWithFinal(hoursData);
   }, [hoursData]);
 
-  const dayAnalysis = useMemo(() => {
-    return buildDayAnalysis(hoursWithFinalPrice);
+  const currentHourData = useMemo(() => {
+    if (!hoursWithFinalPrice?.length) return null;
+
+    const now = new Date().getHours() + 1;
+    return hoursWithFinalPrice.find((h) => h.hour === now);
   }, [hoursWithFinalPrice]);
 
-  const premiumInsight = useMemo(() => {
-    return buildPremiumConsumptionInsight(hoursWithFinalPrice);
-  }, [hoursWithFinalPrice]);
+  const currentPrice = currentHourData?.finalPrice ?? 0;
 
-const currentHourData = useMemo(() => {
-  if (!hoursWithFinalPrice?.length) return null;
+  const productionKw = toKw(solarCurrent?.productionPowerW);
+  const consumptionKw = toKw(solarCurrent?.consumptionPowerW);
+  const excessKw = toKw(solarCurrent?.excessPowerW);
+  const balanceKw = toKw(solarCurrent?.balancePowerW);
 
-  const now = new Date().getHours() + 1;
-
-  return hoursWithFinalPrice.find((h) => h.hour === now);
-}, [hoursWithFinalPrice]);
-
-  // ──────────────────────────────
-  // MEMOS · WEATHER
-  // ──────────────────────────────
-
-  const weatherCondition = weather?.energy?.condition;
-
-  const heroTone = useMemo(() => {
-    if (weatherCondition === "sun") return "cheap";
-    if (weatherCondition === "cloud") return "medium";
-    if (weatherCondition === "rain" || weatherCondition === "snow") {
-      return "expensive";
-    }
-
-    if (premiumInsight.dayType === "cheap") return "cheap";
-    if (premiumInsight.dayType === "normal") return "medium";
-    if (premiumInsight.dayType === "expensive") return "expensive";
-
-    return "neutral";
-  }, [premiumInsight, weatherCondition]);
-
-  const weatherIcon = useMemo(() => {
-    if (weatherCondition === "sun") return "☀️";
-    if (weatherCondition === "cloud") return "☁️";
-    if (weatherCondition === "rain") return "🌧️";
-    if (weatherCondition === "snow") return "❄️";
-    return "🌤️";
-  }, [weatherCondition]);
-
-  const weatherTitle = useMemo(() => {
-    if (weatherCondition === "sun") return "Buen día solar";
-    if (weatherCondition === "cloud") return "Día mixto";
-    if (weatherCondition === "rain") return "Hoy manda la red";
-    if (weatherCondition === "snow") return "Producción solar muy baja";
-    return "Estado energético del día";
-  }, [weatherCondition]);
-
-  const weatherText = useMemo(() => {
-    if (weatherCondition === "sun") {
-      return "Aprovecha las horas centrales para mover consumos a la franja solar.";
-    }
-
-    if (weatherCondition === "cloud") {
-      return "Combina horas con algo de sol y tramos baratos de red.";
-    }
-
-    if (weatherCondition === "rain") {
-      return "Hoy conviene priorizar las horas más baratas de la red.";
-    }
-
-    if (weatherCondition === "snow") {
-      return "No cuentes con apoyo solar fuerte. Prioriza las horas baratas.";
-    }
-
-    return premiumInsight.actionText;
-  }, [premiumInsight, weatherCondition]);
-
-  // ──────────────────────────────
-  // RENDER · ERROR
-  // ──────────────────────────────
+  const realtimeMessage = getRealtimeMessage(excessKw, currentPrice);
 
   if (error) {
     return (
@@ -341,10 +156,6 @@ const currentHourData = useMemo(() => {
     );
   }
 
-  // ──────────────────────────────
-  // RENDER · LOADING
-  // ──────────────────────────────
-
   if (!data || !hoursData) {
     return (
       <div style={styles.page}>
@@ -354,10 +165,6 @@ const currentHourData = useMemo(() => {
       </div>
     );
   }
-
-  // ╔════════════════════════════════════════════════════════════╗
-  // ║ RENDER · MAIN                                                                ║
-  // ╚════════════════════════════════════════════════════════════╝
 
   return (
     <div style={styles.page}>
@@ -371,98 +178,118 @@ const currentHourData = useMemo(() => {
         </header>
 
         {/* ────────────────────────────── */}
-        {/* HERO                          */}
+        {/* TIEMPO REAL                   */}
         {/* ────────────────────────────── */}
-        <section
-          style={{
-            ...homeStyles.heroCard,
-            ...homeStyles.getHeroCardStyle(heroTone),
-          }}
-        >
-          <div style={homeStyles.heroTop}>
-            <div>
-              <div style={homeStyles.heroLabel}>
-                {premiumInsight.subheadline}
-              </div>
+        <section style={homeStyles.infoCard}>
+          <div style={homeStyles.infoTitle}>Tiempo real</div>
 
+          {solarCurrent ? (
+            <>
               <div
                 style={{
-                  ...homeStyles.heroValue,
-                  ...homeStyles.getHeroValueStyle(heroTone),
+                  marginTop: 12,
+                  fontSize: 32,
+                  fontWeight: 900,
+                  color: excessKw > 0.3 ? "#22c55e" : "#f59e0b",
+                  textAlign: "center",
                 }}
               >
-                {premiumInsight.bestWindow?.label || "--:-- - --:--"}
+                {formatEnergy(excessKw)} kW
               </div>
 
-              <div style={homeStyles.heroUnit}>
-                {premiumInsight.headline}
+              <div style={homeStyles.infoText}>excedente disponible ahora</div>
+
+              <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
+                <div>☀️ Producción: {formatEnergy(productionKw)} kW</div>
+                <div>🏠 Consumo casa: {formatEnergy(consumptionKw)} kW</div>
+                <div>
+                  ⚖️ Balance: {balanceKw >= 0 ? "+" : ""}
+                  {formatEnergy(balanceKw)} kW
+                </div>
+                {currentHourData && (
+                  <div>
+                    💶 Precio ahora: {formatPrice(currentHourData.finalPrice)} €/kWh
+                  </div>
+                )}
+              </div>
+
+              <div style={{ ...homeStyles.infoText, marginTop: 12 }}>
+                {realtimeMessage}
+              </div>
+            </>
+          ) : (
+            <div style={homeStyles.infoText}>
+              Datos SolarEdge pendientes de conectar.
+            </div>
+          )}
+        </section>
+
+        {/* ────────────────────────────── */}
+        {/* ACUMULADO DÍA                 */}
+        {/* ────────────────────────────── */}
+        <section style={homeStyles.infoCard}>
+          <div style={homeStyles.infoTitle}>Acumulado día</div>
+
+          {solarDay ? (
+            <>
+              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                <div>
+                  ☀️ Producción:{" "}
+                  {formatEnergy(solarDay.productionKwhUntilNow)} kWh
+                </div>
+                <div>
+                  🏠 Solar consumida:{" "}
+                  {formatEnergy(solarDay.selfConsumptionKwhUntilNow)} kWh
+                </div>
+                <div>
+                  📥 Red consumida:{" "}
+                  {formatEnergy(solarDay.purchasedKwhUntilNow)} kWh
+                </div>
+                <div>
+                  📤 Vertido a red:{" "}
+                  {formatEnergy(solarDay.feedInKwhUntilNow)} kWh
+                </div>
+              </div>
+
+              <div style={{ ...homeStyles.infoText, marginTop: 12 }}>
+                Datos acumulados hasta {solarDay.to?.slice(11, 16)}
+              </div>
+            </>
+          ) : (
+            <div style={homeStyles.infoText}>
+              Acumulado diario pendiente de conectar.
+            </div>
+          )}
+        </section>
+
+        {/* ────────────────────────────── */}
+        {/* ACUMULADO MES                 */}
+        {/* ────────────────────────────── */}
+        <section style={homeStyles.infoCard}>
+          <div style={homeStyles.infoTitle}>Acumulado mes</div>
+
+          {solarMonth ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+              <div>
+                ☀️ Producción: {formatEnergy(solarMonth.productionKwhMonth)} kWh
+              </div>
+              <div>
+                🏠 Solar consumida:{" "}
+                {formatEnergy(solarMonth.selfConsumptionKwhMonth)} kWh
+              </div>
+              <div>
+                📥 Red consumida:{" "}
+                {formatEnergy(solarMonth.purchasedKwhMonth)} kWh
+              </div>
+              <div>
+                📤 Vertido a red: {formatEnergy(solarMonth.feedInKwhMonth)} kWh
               </div>
             </div>
-          </div>
-        </section>
-
-       {/* ────────────────────────────── */}
-       {/* CURRENT PRICE                 */}
-       {/* ────────────────────────────── */}
-       <section style={homeStyles.infoCard}>
-        <div style={homeStyles.infoTitle}>Ahora mismo</div>
-
-        {currentHourData ? (
-         <div style={homeStyles.infoText}>
-          {String(currentHourData.hour - 1).padStart(2, "0")}:00 -{" "}
-          {String(currentHourData.hour).padStart(2, "0")}:00 ·{" "}
-          {formatPrice(currentHourData.finalPrice)} €/kWh
-         </div>
-        ) : (
-          <div style={homeStyles.infoText}>No disponible</div>
-         )}
-        </section>
-
-        {/* ────────────────────────────── */}
-        {/* ACTION CARD                   */}
-        {/* ────────────────────────────── */}
-        <section style={homeStyles.infoCard}>
-          <div style={homeStyles.infoTitle}>Qué hacer hoy</div>
-          <div style={homeStyles.infoText}>{premiumInsight.actionText}</div>
-        </section>
-
-        {/* ────────────────────────────── */}
-        {/* WEATHER CARD                  */}
-        {/* ────────────────────────────── */}
-        <section style={homeStyles.infoCard}>
-          <div style={homeStyles.infoTitle}>
-            {weatherIcon} {weatherTitle}
-          </div>
-          <div style={homeStyles.infoText}>{weatherText}</div>
-        </section>
-
-        {/* ────────────────────────────── */}
-        {/* METRICS                       */}
-        {/* ────────────────────────────── */}
-        <section style={homeStyles.metricsGrid}>
-          <div style={homeStyles.metricCard}>
-            <div style={homeStyles.metricLabel}>Media</div>
-            <div style={homeStyles.metricValue}>
-              {formatPrice(dayAnalysis.avg)}
+          ) : (
+            <div style={homeStyles.infoText}>
+              Acumulado mensual pendiente de conectar.
             </div>
-            <div style={homeStyles.metricUnit}>€/kWh</div>
-          </div>
-
-          <div style={homeStyles.metricCard}>
-            <div style={homeStyles.metricLabel}>Hora más barata</div>
-            <div style={homeStyles.metricValue}>
-              {formatPrice(dayAnalysis.min)}
-            </div>
-            <div style={homeStyles.metricUnit}>€/kWh</div>
-          </div>
-
-          <div style={homeStyles.metricCard}>
-            <div style={homeStyles.metricLabel}>Hora más cara</div>
-            <div style={homeStyles.metricValue}>
-              {formatPrice(dayAnalysis.max)}
-            </div>
-            <div style={homeStyles.metricUnit}>€/kWh</div>
-          </div>
+          )}
         </section>
       </div>
     </div>
