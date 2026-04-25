@@ -19,7 +19,6 @@ app.add_middleware(
 SOLAREDGE_API_KEY = os.getenv("SOLAREDGE_API_KEY")
 SOLAREDGE_SITE_ID = os.getenv("SOLAREDGE_SITE_ID")
 
-
 # ╔════════════════════════════════════════════════════════════╗
 # ║ DATABASE                                                   ║
 # ╚════════════════════════════════════════════════════════════╝
@@ -34,15 +33,12 @@ def init_db():
     conn.commit()
     conn.close()
 
-
 init_db()
-
 
 def get_db_connection():
     conn = sqlite3.connect("/data/omie.db")
     conn.row_factory = sqlite3.Row
     return conn
-
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ DATES                                                      ║
@@ -51,10 +47,8 @@ def get_db_connection():
 def get_today_date():
     return datetime.now().date().isoformat()
 
-
 def get_tomorrow_date():
     return (datetime.now().date() + timedelta(days=1)).isoformat()
-
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE DATA                                                  ║
@@ -75,7 +69,6 @@ def get_latest_day_row():
     conn.close()
     return row
 
-
 def build_day_payload(day):
     if day is None:
         return {"error": "No data"}
@@ -86,7 +79,6 @@ def build_day_payload(day):
         "min_price": round(day["min_price"] / 1000, 5),
         "max_price": round(day["max_price"] / 1000, 5),
     }
-
 
 def build_latest_hours_payload():
     conn = get_db_connection()
@@ -116,6 +108,9 @@ def build_latest_hours_payload():
         if row["date"] == latest_date
     ]
 
+    if not hours:
+        return {"error": "No hourly data"}
+
     best = min(hours, key=lambda x: x["price"])
     worst = max(hours, key=lambda x: x["price"])
 
@@ -126,17 +121,155 @@ def build_latest_hours_payload():
         "worst_hour": worst,
     }
 
+def build_hours_payload_by_date(target_date: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT ph.hour, ph.price, pd.date
+        FROM price_hours ph
+        JOIN price_days pd ON ph.price_day_id = pd.id
+        WHERE pd.date = ?
+        ORDER BY ph.hour ASC
+    """, (target_date,))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return {
+            "date": target_date,
+            "hours": [],
+            "best_hour": None,
+            "worst_hour": None,
+        }
+
+    hours = [
+        {
+            "hour": row["hour"],
+            "price": round(row["price"] / 1000, 5),
+        }
+        for row in rows
+    ]
+
+    best = min(hours, key=lambda x: x["price"])
+    worst = max(hours, key=lambda x: x["price"])
+
+    return {
+        "date": target_date,
+        "hours": hours,
+        "best_hour": best,
+        "worst_hour": worst,
+    }
+
+def build_latest_periods_payload():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, date
+        FROM price_days
+        ORDER BY date DESC
+        LIMIT 1
+    """)
+
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        return {"date": None, "periods": []}
+
+    price_day_id = row["id"]
+    date = row["date"]
+
+    cursor.execute("""
+        SELECT period, price
+        FROM price_periods
+        WHERE price_day_id = ?
+        ORDER BY period ASC
+    """, (price_day_id,))
+
+    periods = cursor.fetchall()
+    conn.close()
+
+    return {
+        "date": date,
+        "periods": [
+            {
+                "period": p["period"],
+                "price": round(p["price"] / 1000, 5),
+            }
+            for p in periods
+        ],
+    }
+
+def build_periods_payload_by_date(target_date: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT pp.period, pp.price, pd.date
+        FROM price_periods pp
+        JOIN price_days pd ON pp.price_day_id = pd.id
+        WHERE pd.date = ?
+        ORDER BY pp.period ASC
+    """, (target_date,))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return {
+            "date": target_date,
+            "periods": [],
+        }
+
+    return {
+        "date": target_date,
+        "periods": [
+            {
+                "period": row["period"],
+                "price": round(row["price"] / 1000, 5),
+            }
+            for row in rows
+        ],
+    }
+
+def build_price_days_history_payload(limit: int = 30):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT date, avg_price, min_price, max_price
+        FROM price_days
+        ORDER BY date DESC
+        LIMIT ?
+    """, (limit,))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return {
+        "days": [
+            {
+                "date": row["date"],
+                "avg_price": round(row["avg_price"] / 1000, 5),
+                "min_price": round(row["min_price"] / 1000, 5),
+                "max_price": round(row["max_price"] / 1000, 5),
+            }
+            for row in rows
+        ]
+    }
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ SOLAREDGE DATA                                             ║
 # ╚════════════════════════════════════════════════════════════╝
 
+NEXUS_START_DATE = "2026-04-04"
 LOCAL_TZ = ZoneInfo("Europe/Madrid")
-
 
 def get_local_now():
     return datetime.now(LOCAL_TZ).replace(tzinfo=None)
-
 
 def fetch_solaredge(path: str, params: dict | None = None):
     if params is None:
@@ -162,12 +295,29 @@ def fetch_solaredge(path: str, params: dict | None = None):
 
     return response.json()
 
-
 def floor_to_quarter(dt: datetime):
-    return dt.replace(minute=(dt.minute // 15) * 15, second=0, microsecond=0)
+    minute = (dt.minute // 15) * 15
+    return dt.replace(minute=minute, second=0, microsecond=0)
 
+def sum_energy_details(meters, mapping):
+    result = {value: 0 for value in mapping.values()}
 
-# 🔥 TIEMPO REAL (esto lo dejamos igual)
+    for meter in meters:
+        meter_type = meter.get("type")
+        key = mapping.get(meter_type)
+
+        if not key:
+            continue
+
+        total_wh = sum(
+            float(item.get("value") or 0)
+            for item in meter.get("values", [])
+            if item.get("value") is not None
+        )
+
+        result[key] = round(total_wh / 1000, 3)
+
+    return result
 
 def build_solaredge_current_payload():
     data = fetch_solaredge("currentPowerFlow")
@@ -180,15 +330,24 @@ def build_solaredge_current_payload():
     pv = flow.get("PV", {})
     load = flow.get("LOAD", {})
     grid = flow.get("GRID", {})
+    storage = flow.get("STORAGE", {})
+
+    production_kw = float(pv.get("currentPower", 0) or 0)
+    consumption_kw = float(load.get("currentPower", 0) or 0)
+    grid_kw = float(grid.get("currentPower", 0) or 0)
+    storage_kw = float(storage.get("currentPower", 0) or 0)
+
+    excess_kw = max(production_kw - consumption_kw, 0)
 
     return {
-        "productionPowerW": float(pv.get("currentPower", 0) or 0),
-        "consumptionPowerW": float(load.get("currentPower", 0) or 0),
-        "gridPowerW": float(grid.get("currentPower", 0) or 0),
+        "productionPowerW": round(production_kw * 1000, 2),
+        "consumptionPowerW": round(consumption_kw * 1000, 2),
+        "excessPowerW": round(excess_kw * 1000, 2),
+        "balancePowerW": round((production_kw - consumption_kw) * 1000, 2),
+        "gridPowerW": round(grid_kw * 1000, 2),
+        "storagePowerW": round(storage_kw * 1000, 2),
+        "raw": flow,
     }
-
-
-# 🔥 ACUMULADO DÍA REAL (CLAVE - DESDE POTENCIA)
 
 def build_solaredge_quarters_today_payload():
     now = get_local_now()
@@ -196,129 +355,169 @@ def build_solaredge_quarters_today_payload():
     today = end_time.date().isoformat()
 
     data = fetch_solaredge(
-        "powerDetails",
+        "energyDetails",
         {
             "timeUnit": "QUARTER_OF_AN_HOUR",
             "startTime": f"{today} 00:00:00",
             "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "meters": "Production,Consumption,FeedIn,SelfConsumption",
+            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
         },
     )
 
     if data.get("error"):
         return data
 
-    meters = data.get("powerDetails", {}).get("meters", [])
+    meters = data.get("energyDetails", {}).get("meters", [])
 
-    production = 0
-    consumption = 0
-    feed = 0
-    grid = 0
-
-    for m in meters:
-        m_type = m.get("type")
-
-        for v in m.get("values", []):
-            val = v.get("value")
-
-            if val is None:
-                continue
-
-            val = float(val)
-            kwh = val * 0.25 / 1000  # 🔥 integración real
-
-            if m_type == "Production":
-                production += kwh
-
-            elif m_type == "Consumption":
-                consumption += kwh
-
-            elif m_type == "FeedIn":
-                feed += kwh
-
-            elif m_type == "SelfConsumption":
-                # 🔥 SOLO consumo de red real (como Excel)
-                if val > 0:
-                    grid += kwh
+    mapping = {
+        "Production": "productionKwhUntilNow",
+        "Consumption": "consumptionKwhUntilNow",
+        "SelfConsumption": "selfConsumptionKwhUntilNow",
+        "FeedIn": "feedInKwhUntilNow",
+        "Purchased": "purchasedKwhUntilNow",
+    }
 
     return {
         "date": today,
         "from": f"{today} 00:00:00",
         "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-
-        "productionKwhUntilNow": round(production, 3),
-        "consumptionKwhUntilNow": round(consumption, 3),
-        "feedInKwhUntilNow": round(feed, 3),
-
-        # 🔥 ESTE ES EL IMPORTANTE
-        "purchasedKwhUntilNow": round(grid, 3),
+        **sum_energy_details(meters, mapping),
+        "intervalsCount": max(
+            [len(meter.get("values", [])) for meter in meters] or [0]
+        ),
     }
-
-
-# 🔥 ACUMULADO DESDE INICIO (MES / PERIODO)
 
 def build_solaredge_month_payload():
     now = get_local_now()
     end_time = floor_to_quarter(now)
 
     data = fetch_solaredge(
-        "powerDetails",
+        "energyDetails",
         {
-            "timeUnit": "QUARTER_OF_AN_HOUR",
-            "startTime": "2026-04-04 00:00:00",
+            "timeUnit": "DAY",
+            "startTime": f"{NEXUS_START_DATE} 00:00:00",
             "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "meters": "Production,Consumption,FeedIn,SelfConsumption",
+            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
         },
     )
 
     if data.get("error"):
         return data
 
-    meters = data.get("powerDetails", {}).get("meters", [])
+    meters = data.get("energyDetails", {}).get("meters", [])
 
-    production = 0
-    consumption = 0
-    feed = 0
-    grid = 0
-
-    for m in meters:
-        m_type = m.get("type")
-
-        for v in m.get("values", []):
-            val = v.get("value")
-
-            if val is None:
-                continue
-
-            val = float(val)
-            kwh = val * 0.25 / 1000
-
-            if m_type == "Production":
-                production += kwh
-
-            elif m_type == "Consumption":
-                consumption += kwh
-
-            elif m_type == "FeedIn":
-                feed += kwh
-
-            elif m_type == "SelfConsumption":
-                if val > 0:
-                    grid += kwh
+    mapping = {
+        "Production": "productionKwhMonth",
+        "Consumption": "consumptionKwhMonth",
+        "SelfConsumption": "selfConsumptionKwhMonth",
+        "FeedIn": "feedInKwhMonth",
+        "Purchased": "purchasedKwhMonth",
+    }
 
     return {
-        "from": "2026-04-04 00:00:00",
+        "from": f"{NEXUS_START_DATE} 00:00:00",
         "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-
-        "productionKwhMonth": round(production, 3),
-        "consumptionKwhMonth": round(consumption, 3),
-        "feedInKwhMonth": round(feed, 3),
-        "purchasedKwhMonth": round(grid, 3),
+        **sum_energy_details(meters, mapping),
     }
+
 # ╔════════════════════════════════════════════════════════════╗
-# ║ ENDPOINTS                                                  ║
+# ║ OMIE ENDPOINTS                                             ║
 # ╚════════════════════════════════════════════════════════════╝
 
+@app.get("/price-day/latest")
+def get_latest_price_day():
+    return build_day_payload(get_latest_day_row())
+
+@app.get("/price-hours/latest")
+def get_latest_price_hours():
+    return build_latest_hours_payload()
+
+@app.get("/price-periods/latest")
+def get_latest_periods():
+    return build_latest_periods_payload()
+
+@app.get("/price-hours/by-date")
+def get_price_hours_by_date(date: str):
+    return build_hours_payload_by_date(date)
+
+@app.get("/price-periods/by-date")
+def get_price_periods_by_date(date: str):
+    return build_periods_payload_by_date(date)
+
+@app.get("/price-days/history")
+def get_price_days_history(limit: int = 30):
+    return build_price_days_history_payload(limit)
+
+# ╔════════════════════════════════════════════════════════════╗
+# ║ SOLAREDGE ENDPOINTS                                        ║
+# ╚════════════════════════════════════════════════════════════╝
+
+@app.get("/solar-edge/current")
+def get_solaredge_current():
+    return build_solaredge_current_payload()
+
 @app.get("/solar-edge/quarters-today")
-def get_solaredge():
+def get_solaredge_quarters_today():
     return build_solaredge_quarters_today_payload()
+
+@app.get("/solar-edge/month")
+def get_solaredge_month():
+    return build_solaredge_month_payload()
+
+# ╔════════════════════════════════════════════════════════════╗
+# ║ OMIE IMPORT ENDPOINTS                                      ║
+# ╚════════════════════════════════════════════════════════════╝
+
+@app.get("/import-omie")
+def import_omie():
+    from scripts.fetch_omie import fetch_list_page, process_latest_available
+
+    html = fetch_list_page()
+
+    if not html:
+        return {"status": "error", "message": "No se pudo cargar listado OMIE"}
+
+    process_latest_available(html)
+
+    return {"status": "ok"}
+
+@app.get("/import-omie-range")
+def import_omie_range(start: str, end: str):
+    from scripts.fetch_omie import fetch_list_page, process_date
+
+    html = fetch_list_page()
+
+    if not html:
+        return {"status": "error", "message": "No se pudo cargar listado OMIE"}
+
+    try:
+        start_date = datetime.strptime(start, "%Y-%m-%d")
+        end_date = datetime.strptime(end, "%Y-%m-%d")
+    except ValueError:
+        return {
+            "status": "error",
+            "message": "Formato de fecha inválido. Usa YYYY-MM-DD",
+        }
+
+    current = start_date
+    imported = 0
+    failed = []
+
+    while current <= end_date:
+        date_iso = current.strftime("%Y-%m-%d")
+        date_compact = current.strftime("%Y%m%d")
+
+        ok = process_date(date_iso, date_compact, html)
+
+        if ok:
+            imported += 1
+        else:
+            failed.append(date_iso)
+
+        current += timedelta(days=1)
+
+    return {
+        "status": "ok",
+        "imported": imported,
+        "failed": failed,
+    }
