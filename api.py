@@ -334,14 +334,20 @@ def build_solaredge_current_payload():
     }
 
 
-def calculate_power_accumulation(start_time: str, end_time: str):
+# 🔍 DEBUG REAL DE METERS
+
+def build_solaredge_power_debug_payload():
+    now = get_local_now()
+    end_time = floor_to_quarter(now)
+    today = end_time.date().isoformat()
+
     data = fetch_solaredge(
         "powerDetails",
         {
             "timeUnit": "QUARTER_OF_AN_HOUR",
-            "startTime": start_time,
-            "endTime": end_time,
-            "meters": "Production,Consumption,FeedIn,Purchased",
+            "startTime": f"{today} 00:00:00",
+            "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
         },
     )
 
@@ -350,101 +356,19 @@ def calculate_power_accumulation(start_time: str, end_time: str):
 
     meters = data.get("powerDetails", {}).get("meters", [])
 
-    result = {
-        "production": 0,
-        "consumption": 0,
-        "feedin": 0,
-        "purchased": 0,
-    }
-
-    mapping = {
-        "Production": "production",
-        "Consumption": "consumption",
-        "FeedIn": "feedin",
-        "Purchased": "purchased",
-    }
-
-    intervals_count = 0
-
-    for meter in meters:
-        meter_type = meter.get("type")
-        key = mapping.get(meter_type)
-
-        if not key:
-            continue
-
-        values = meter.get("values", [])
-        intervals_count = max(intervals_count, len(values))
-
-        for item in values:
-            value_w = item.get("value")
-
-            if value_w is None:
-                continue
-
-            result[key] += float(value_w) * 0.25 / 1000
-
-    production = result["production"]
-    feedin = result["feedin"]
-    self_consumption = max(production - feedin, 0)
-
-    return {
-        "production": round(production, 3),
-        "consumption": round(result["consumption"], 3),
-        "self_consumption": round(self_consumption, 3),
-        "feedin": round(feedin, 3),
-        "purchased": round(result["purchased"], 3),
-        "intervalsCount": intervals_count,
-    }
-
-
-def build_solaredge_quarters_today_payload():
-    now = get_local_now()
-    end_time = floor_to_quarter(now)
-    today = end_time.date().isoformat()
-
-    result = calculate_power_accumulation(
-        f"{today} 00:00:00",
-        end_time.strftime("%Y-%m-%d %H:%M:%S"),
-    )
-
-    if result.get("error"):
-        return result
-
     return {
         "date": today,
         "from": f"{today} 00:00:00",
         "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        "productionKwhUntilNow": result["production"],
-        "consumptionKwhUntilNow": result["consumption"],
-        "selfConsumptionKwhUntilNow": result["self_consumption"],
-        "feedInKwhUntilNow": result["feedin"],
-        "purchasedKwhUntilNow": result["purchased"],
-        "intervalsCount": result["intervalsCount"],
-    }
-
-
-def build_solaredge_month_payload():
-    now = get_local_now()
-    end_time = floor_to_quarter(now)
-
-    result = calculate_power_accumulation(
-        f"{NEXUS_START_DATE} 00:00:00",
-        end_time.strftime("%Y-%m-%d %H:%M:%S"),
-    )
-
-    if result.get("error"):
-        return result
-
-    return {
-        "from": f"{NEXUS_START_DATE} 00:00:00",
-        "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        "productionKwhMonth": result["production"],
-        "consumptionKwhMonth": result["consumption"],
-        "selfConsumptionKwhMonth": result["self_consumption"],
-        "feedInKwhMonth": result["feedin"],
-        "purchasedKwhMonth": result["purchased"],
-        "intervalsCount": result["intervalsCount"],
+        "meters": [
+            {
+                "type": meter.get("type"),
+                "valuesCount": len(meter.get("values", [])),
+                "firstValues": meter.get("values", [])[:5],
+                "lastValues": meter.get("values", [])[-5:],
+            }
+            for meter in meters
+        ],
     }
 
 # ╔════════════════════════════════════════════════════════════╗
@@ -490,6 +414,10 @@ def get_solaredge_quarters_today():
 @app.get("/solar-edge/month")
 def get_solaredge_month():
     return build_solaredge_month_payload()
+
+@app.get("/solar-edge/power-debug")
+def get_solaredge_power_debug():
+    return build_solaredge_power_debug_payload()
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE IMPORT ENDPOINTS                                      ║
