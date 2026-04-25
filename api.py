@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 import requests
+import os
 from datetime import datetime, timedelta
 
 app = FastAPI()
@@ -14,8 +15,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-OPEN_METEO_GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
-OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+SOLAREDGE_API_KEY = os.getenv("SOLAREDGE_API_KEY")
+SOLAREDGE_SITE_ID = os.getenv("SOLAREDGE_SITE_ID")
 
 
 # ╔════════════════════════════════════════════════════════════╗
@@ -34,6 +35,7 @@ def init_db():
 
 
 init_db()
+
 
 def get_db_connection():
     conn = sqlite3.connect("/data/omie.db")
@@ -54,12 +56,8 @@ def get_tomorrow_date():
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE DATA                                                 	                 ║
+# ║ OMIE DATA                                                                    ║
 # ╚════════════════════════════════════════════════════════════╝
-
-# ──────────────────────────────
-# DAY HELPERS
-# ──────────────────────────────
 
 def get_latest_day_row():
     conn = get_db_connection()
@@ -88,10 +86,6 @@ def build_day_payload(day):
         "max_price": round(day["max_price"] / 1000, 5),
     }
 
-
-# ──────────────────────────────
-# HOURS HELPERS
-# ──────────────────────────────
 
 def build_latest_hours_payload():
     conn = get_db_connection()
@@ -177,10 +171,6 @@ def build_hours_payload_by_date(target_date: str):
     }
 
 
-# ──────────────────────────────
-# PERIODS HELPERS
-# ──────────────────────────────
-
 def build_latest_periods_payload():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -255,10 +245,6 @@ def build_periods_payload_by_date(target_date: str):
     }
 
 
-# ──────────────────────────────
-# HISTORY HELPERS
-# ──────────────────────────────
-
 def build_price_days_history_payload(limit: int = 30):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -286,9 +272,123 @@ def build_price_days_history_payload(limit: int = 30):
     }
 
 
-# ──────────────────────────────
-# OMIE ENDPOINTS
-# ──────────────────────────────
+# ╔════════════════════════════════════════════════════════════╗
+# ║ SOLAREDGE DATA                                                               ║
+# ╚════════════════════════════════════════════════════════════╝
+
+def fetch_solaredge(path: str, params: dict | None = None):
+    if params is None:
+        params = {}
+
+    if not SOLAREDGE_API_KEY or not SOLAREDGE_SITE_ID:
+        return {
+            "error": "Faltan SOLAREDGE_API_KEY o SOLAREDGE_SITE_ID"
+        }
+
+    url = f"https://monitoringapi.solaredge.com/site/{SOLAREDGE_SITE_ID}/{path}"
+
+    request_params = {
+        **params,
+        "api_key": SOLAREDGE_API_KEY,
+    }
+
+    response = requests.get(url, params=request_params, timeout=20)
+
+    if response.status_code != 200:
+        return {
+            "error": "Error al consultar SolarEdge",
+            "status_code": response.status_code,
+            "detail": response.text,
+        }
+
+    return response.json()
+
+
+def build_solaredge_current_payload():
+    data = fetch_solaredge("currentPowerFlow")
+
+    if data.get("error"):
+        return data
+
+    flow = data.get("siteCurrentPowerFlow", {})
+
+    pv = flow.get("PV", {})
+    load = flow.get("LOAD", {})
+    grid = flow.get("GRID", {})
+    storage = flow.get("STORAGE", {})
+
+    production_kw = float(pv.get("currentPower", 0) or 0)
+    consumption_kw = float(load.get("currentPower", 0) or 0)
+    grid_kw = float(grid.get("currentPower", 0) or 0)
+    storage_kw = float(storage.get("currentPower", 0) or 0)
+
+    return {
+        "productionPowerW": round(production_kw * 1000, 2),
+        "consumptionPowerW": round(consumption_kw * 1000, 2),
+        "balancePowerW": round((production_kw - consumption_kw) * 1000, 2),
+        "gridPowerW": round(grid_kw * 1000, 2),
+        "storagePowerW": round(storage_kw * 1000, 2),
+        "raw": flow,
+    }
+
+
+def build_solaredge_today_payload():
+    today = get_today_date()
+
+    data = fetch_solaredge(
+        "energyDetails",
+        {
+            "timeUnit": "DAY",
+            "startTime": f"{today} 00:00:00",
+            "endTime": f"{today} 23:59:59",
+            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
+        },
+    )
+
+    if data.get("error"):
+        return data
+
+    meters = data.get("energyDetails", {}).get("meters", [])
+
+    result = {
+        "date": today,
+        "productionKwh": 0,
+        "consumptionKwh": 0,
+        "selfConsumptionKwh": 0,
+        "feedInKwh": 0,
+        "purchasedKwh": 0,
+    }
+
+    mapping = {
+        "Production": "productionKwh",
+        "Consumption": "consumptionKwh",
+        "SelfConsumption": "selfConsumptionKwh",
+        "FeedIn": "feedInKwh",
+        "Purchased": "purchasedKwh",
+    }
+
+    for meter in meters:
+        meter_type = meter.get("type")
+        key = mapping.get(meter_type)
+
+        if not key:
+            continue
+
+        values = meter.get("values", [])
+
+        total_wh = sum(
+            float(item.get("value") or 0)
+            for item in values
+        )
+
+        result[key] = round(total_wh / 1000, 3)
+
+    return result
+
+
+# ╔════════════════════════════════════════════════════════════╗
+# ║ OMIE ENDPOINTS                                                               ║
+# ╚════════════════════════════════════════════════════════════╝
 
 @app.get("/price-day/latest")
 def get_latest_price_day():
@@ -321,101 +421,22 @@ def get_price_days_history(limit: int = 30):
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ WEATHER                                                                      ║
+# ║ SOLAREDGE ENDPOINTS                                                          ║
 # ╚════════════════════════════════════════════════════════════╝
 
-# ──────────────────────────────
-# GEOCODING HELPERS
-# ──────────────────────────────
-
-def geocode_location(location: str):
-    response = requests.get(
-        OPEN_METEO_GEOCODING_URL,
-        params={
-            "name": location,
-            "count": 1,
-            "language": "es",
-            "format": "json",
-        },
-        timeout=20,
-    )
-
-    if response.status_code != 200:
-        return None
-
-    data = response.json()
-    results = data.get("results") or []
-
-    if not results:
-        return None
-
-    result = results[0]
-
-    return {
-        "name": result.get("name"),
-        "latitude": result.get("latitude"),
-        "longitude": result.get("longitude"),
-        "timezone": result.get("timezone"),
-    }
+@app.get("/solar-edge/current")
+def get_solaredge_current():
+    return build_solaredge_current_payload()
 
 
-# ──────────────────────────────
-# FORECAST HELPERS
-# ──────────────────────────────
-
-def fetch_weather_for_coordinates(lat, lon, timezone="auto"):
-    response = requests.get(
-        OPEN_METEO_FORECAST_URL,
-        params={
-            "latitude": lat,
-            "longitude": lon,
-            "timezone": timezone,
-            "current": "cloud_cover,shortwave_radiation",
-        },
-        timeout=20,
-    )
-
-    if response.status_code != 200:
-        return None
-
-    return response.json()
+@app.get("/solar-edge/today")
+def get_solaredge_today():
+    return build_solaredge_today_payload()
 
 
-def build_weather_payload(location):
-    geo = geocode_location(location)
-
-    if not geo:
-        return {"error": "Localidad no encontrada"}
-
-    weather = fetch_weather_for_coordinates(
-        geo["latitude"],
-        geo["longitude"],
-        geo["timezone"]
-    )
-
-    if not weather:
-        return {"error": "Error meteo"}
-
-    current = weather.get("current", {})
-
-    return {
-        "location": geo,
-        "current": current
-    }
-
-
-# ──────────────────────────────
-# WEATHER ENDPOINTS
-# ──────────────────────────────
-
-@app.get("/weather/by-location")
-def get_weather_by_location(location: str):
-    return build_weather_payload(location)
-
-
-# ──────────────────────────────
-# OMIE IMPORT ENDPOINTS
-# ──────────────────────────────
+# ╔════════════════════════════════════════════════════════════╗
+# ║ OMIE IMPORT ENDPOINTS                                                        ║
+# ╚════════════════════════════════════════════════════════════╝
 
 @app.get("/import-omie")
 def import_omie():
@@ -433,7 +454,6 @@ def import_omie():
 
 @app.get("/import-omie-range")
 def import_omie_range(start: str, end: str):
-    from datetime import datetime, timedelta
     from scripts.fetch_omie import fetch_list_page, process_date
 
     html = fetch_list_page()
@@ -445,7 +465,10 @@ def import_omie_range(start: str, end: str):
         start_date = datetime.strptime(start, "%Y-%m-%d")
         end_date = datetime.strptime(end, "%Y-%m-%d")
     except ValueError:
-        return {"status": "error", "message": "Formato de fecha inválido. Usa YYYY-MM-DD"}
+        return {
+            "status": "error",
+            "message": "Formato de fecha inválido. Usa YYYY-MM-DD",
+        }
 
     current = start_date
     imported = 0
@@ -469,5 +492,3 @@ def import_omie_range(start: str, end: str):
         "imported": imported,
         "failed": failed,
     }
-
-
