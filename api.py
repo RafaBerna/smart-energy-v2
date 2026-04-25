@@ -276,6 +276,14 @@ def build_price_days_history_payload(limit: int = 30):
 # ║ SOLAREDGE DATA                                             ║
 # ╚════════════════════════════════════════════════════════════╝
 
+NEXUS_START_DATE = "2026-04-04"
+LOCAL_TZ = ZoneInfo("Europe/Madrid")
+
+
+def get_local_now():
+    return datetime.now(LOCAL_TZ).replace(tzinfo=None)
+
+
 def fetch_solaredge(path: str, params: dict | None = None):
     if params is None:
         params = {}
@@ -301,7 +309,12 @@ def fetch_solaredge(path: str, params: dict | None = None):
     return response.json()
 
 
-def sum_meter_values(meters, mapping):
+def floor_to_quarter(dt: datetime):
+    minute = (dt.minute // 15) * 15
+    return dt.replace(minute=minute, second=0, microsecond=0)
+
+
+def sum_energy_details(meters, mapping):
     result = {value: 0 for value in mapping.values()}
 
     for meter in meters:
@@ -311,11 +324,9 @@ def sum_meter_values(meters, mapping):
         if not key:
             continue
 
-        values = meter.get("values", [])
-
         total_wh = sum(
             float(item.get("value") or 0)
-            for item in values
+            for item in meter.get("values", [])
             if item.get("value") is not None
         )
 
@@ -355,13 +366,8 @@ def build_solaredge_current_payload():
     }
 
 
-def floor_to_quarter(dt: datetime):
-    minute = (dt.minute // 15) * 15
-    return dt.replace(minute=minute, second=0, microsecond=0)
-
-
 def build_solaredge_quarters_today_payload():
-    now = datetime.now()
+    now = get_local_now()
     end_time = floor_to_quarter(now)
     today = end_time.date().isoformat()
 
@@ -388,30 +394,27 @@ def build_solaredge_quarters_today_payload():
         "Purchased": "purchasedKwhUntilNow",
     }
 
-    result = {
+    return {
         "date": today,
         "from": f"{today} 00:00:00",
         "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        **sum_meter_values(meters, mapping),
+        **sum_energy_details(meters, mapping),
         "intervalsCount": max(
             [len(meter.get("values", [])) for meter in meters] or [0]
         ),
     }
 
-    return result
-
 
 def build_solaredge_month_payload():
-    now = datetime.now()
-    today = now.date().isoformat()
-    month_start = now.replace(day=1).date().isoformat()
+    now = get_local_now()
+    end_time = floor_to_quarter(now)
 
     data = fetch_solaredge(
         "energyDetails",
         {
             "timeUnit": "DAY",
-            "startTime": f"{month_start} 00:00:00",
-            "endTime": f"{today} 23:59:59",
+            "startTime": f"{NEXUS_START_DATE} 00:00:00",
+            "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
             "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
         },
     )
@@ -430,10 +433,11 @@ def build_solaredge_month_payload():
     }
 
     return {
-        "from": f"{month_start} 00:00:00",
-        "to": f"{today} 23:59:59",
-        **sum_meter_values(meters, mapping),
+        "from": f"{NEXUS_START_DATE} 00:00:00",
+        "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+        **sum_energy_details(meters, mapping),
     }
+
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE ENDPOINTS                                                         ║
 # ╚════════════════════════════════════════════════════════════╝
