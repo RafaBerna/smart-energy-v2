@@ -19,7 +19,7 @@ OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ DATABASE                                                  ║
+# ║ DATABASE                                                                     ║
 # ╚════════════════════════════════════════════════════════════╝
 
 def init_db():
@@ -42,7 +42,7 @@ def get_db_connection():
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ DATES                                                     ║
+# ║ DATES                                                                        ║
 # ╚════════════════════════════════════════════════════════════╝
 
 def get_today_date():
@@ -54,7 +54,7 @@ def get_tomorrow_date():
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE DATA                                                 ║
+# ║ OMIE DATA                                                 	                 ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -321,7 +321,7 @@ def get_price_days_history(limit: int = 30):
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ WEATHER                                                   ║
+# ║ WEATHER                                                                      ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -412,6 +412,11 @@ def build_weather_payload(location):
 def get_weather_by_location(location: str):
     return build_weather_payload(location)
 
+
+# ──────────────────────────────
+# OMIE IMPORT ENDPOINTS
+# ──────────────────────────────
+
 @app.get("/import-omie")
 def import_omie():
     from scripts.fetch_omie import fetch_list_page, process_latest_available
@@ -424,3 +429,45 @@ def import_omie():
     process_latest_available(html)
 
     return {"status": "ok"}
+
+
+@app.get("/import-omie-range")
+def import_omie_range(start: str, end: str):
+    from datetime import datetime, timedelta
+    from scripts.fetch_omie import fetch_list_page, process_date
+
+    html = fetch_list_page()
+
+    if not html:
+        return {"status": "error", "message": "No se pudo cargar listado OMIE"}
+
+    try:
+        start_date = datetime.strptime(start, "%Y-%m-%d")
+        end_date = datetime.strptime(end, "%Y-%m-%d")
+    except ValueError:
+        return {"status": "error", "message": "Formato de fecha inválido. Usa YYYY-MM-DD"}
+
+    current = start_date
+    imported = 0
+    failed = []
+
+    while current <= end_date:
+        date_iso = current.strftime("%Y-%m-%d")
+        date_compact = current.strftime("%Y%m%d")
+
+        ok = process_date(date_iso, date_compact, html)
+
+        if ok:
+            imported += 1
+        else:
+            failed.append(date_iso)
+
+        current += timedelta(days=1)
+
+    return {
+        "status": "ok",
+        "imported": imported,
+        "failed": failed,
+    }
+
+
