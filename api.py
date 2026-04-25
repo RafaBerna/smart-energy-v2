@@ -341,7 +341,7 @@ def calculate_power_accumulation(start_time: str, end_time: str):
             "timeUnit": "QUARTER_OF_AN_HOUR",
             "startTime": start_time,
             "endTime": end_time,
-            "meters": "Production,Consumption,FeedIn",
+            "meters": "Production,Consumption,FeedIn,Purchased",
         },
     )
 
@@ -350,54 +350,51 @@ def calculate_power_accumulation(start_time: str, end_time: str):
 
     meters = data.get("powerDetails", {}).get("meters", [])
 
-    series = {}
+    result = {
+        "production": 0,
+        "consumption": 0,
+        "feedin": 0,
+        "purchased": 0,
+    }
+
+    mapping = {
+        "Production": "production",
+        "Consumption": "consumption",
+        "FeedIn": "feedin",
+        "Purchased": "purchased",
+    }
+
+    intervals_count = 0
 
     for meter in meters:
         meter_type = meter.get("type")
+        key = mapping.get(meter_type)
 
-        for item in meter.get("values", []):
-            date = item.get("date")
-            value = item.get("value")
+        if not key:
+            continue
 
-            if not date or value is None:
+        values = meter.get("values", [])
+        intervals_count = max(intervals_count, len(values))
+
+        for item in values:
+            value_w = item.get("value")
+
+            if value_w is None:
                 continue
 
-            if date not in series:
-                series[date] = {
-                    "Production": 0,
-                    "Consumption": 0,
-                    "FeedIn": 0,
-                }
+            result[key] += float(value_w) * 0.25 / 1000
 
-            series[date][meter_type] = float(value)
-
-    production_kwh = 0
-    consumption_kwh = 0
-    feedin_kwh = 0
-    self_consumption_kwh = 0
-    purchased_kwh = 0
-
-    for values in series.values():
-        production_w = values.get("Production", 0)
-        consumption_w = values.get("Consumption", 0)
-        feedin_w = values.get("FeedIn", 0)
-
-        solar_used_w = max(production_w - feedin_w, 0)
-        grid_used_w = max(consumption_w - solar_used_w, 0)
-
-        production_kwh += production_w * 0.25 / 1000
-        consumption_kwh += consumption_w * 0.25 / 1000
-        feedin_kwh += feedin_w * 0.25 / 1000
-        self_consumption_kwh += solar_used_w * 0.25 / 1000
-        purchased_kwh += grid_used_w * 0.25 / 1000
+    production = result["production"]
+    feedin = result["feedin"]
+    self_consumption = max(production - feedin, 0)
 
     return {
-        "production": round(production_kwh, 3),
-        "consumption": round(consumption_kwh, 3),
-        "self_consumption": round(self_consumption_kwh, 3),
-        "feedin": round(feedin_kwh, 3),
-        "purchased": round(purchased_kwh, 3),
-        "intervalsCount": len(series),
+        "production": round(production, 3),
+        "consumption": round(result["consumption"], 3),
+        "self_consumption": round(self_consumption, 3),
+        "feedin": round(feedin, 3),
+        "purchased": round(result["purchased"], 3),
+        "intervalsCount": intervals_count,
     }
 
 
