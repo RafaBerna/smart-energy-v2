@@ -4,7 +4,7 @@ import sqlite3
 import requests
 import os
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInf
+from zoneinfo import ZoneInfo
 
 app = FastAPI()
 
