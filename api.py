@@ -446,7 +446,7 @@ def build_solaredge_month_payload():
             elif m_type == "FeedIn":
                 feed += kwh
 
-    grid = max(consumption - self_consumption, 0)
+    grid = max(consumption - production + feed, 0)
 
     return {
         "from": f"{NEXUS_START_DATE} 00:00:00",
