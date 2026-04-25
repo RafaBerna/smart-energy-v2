@@ -494,18 +494,27 @@ def get_price_days_history(limit: int = 30):
 def get_solaredge_current():
     return build_solaredge_current_payload()
 
+
 @app.get("/solar-edge/quarters-today")
 def get_solaredge_quarters_today():
     return build_solaredge_quarters_today_payload()
+
 
 @app.get("/solar-edge/month")
 def get_solaredge_month():
     return build_solaredge_month_payload()
 
+
 @app.get("/solar-edge/power-debug")
 def get_solaredge_power_debug():
     return build_solaredge_power_debug_payload()
 
+
+# 🔥 NUEVO: METERS (contador real)
+@app.get("/solar-edge/meters")
+def get_solar_edge_meters():
+    data = fetch_solaredge("meters")
+    return data
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE IMPORT ENDPOINTS                                      ║
 # ╚════════════════════════════════════════════════════════════╝
