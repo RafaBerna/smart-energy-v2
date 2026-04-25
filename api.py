@@ -314,8 +314,9 @@ def floor_to_quarter(dt: datetime):
     return dt.replace(minute=minute, second=0, microsecond=0)
 
 
-def sum_energy_details(meters, mapping):
+def sum_power_details(meters, mapping):
     result = {value: 0 for value in mapping.values()}
+    intervals_count = 0
 
     for meter in meters:
         meter_type = meter.get("type")
@@ -324,14 +325,22 @@ def sum_energy_details(meters, mapping):
         if not key:
             continue
 
-        total_wh = sum(
-            float(item.get("value") or 0)
-            for item in meter.get("values", [])
-            if item.get("value") is not None
-        )
+        values = meter.get("values", [])
+        intervals_count = max(intervals_count, len(values))
 
-        result[key] = round(total_wh / 1000, 3)
+        total_kwh = 0
 
+        for item in values:
+            value_w = item.get("value")
+
+            if value_w is None:
+                continue
+
+            total_kwh += float(value_w) * 0.25 / 1000
+
+        result[key] = round(total_kwh, 3)
+
+    result["intervalsCount"] = intervals_count
     return result
 
 
@@ -372,36 +381,42 @@ def build_solaredge_quarters_today_payload():
     today = end_time.date().isoformat()
 
     data = fetch_solaredge(
-        "energyDetails",
+        "powerDetails",
         {
             "timeUnit": "QUARTER_OF_AN_HOUR",
             "startTime": f"{today} 00:00:00",
             "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
+            "meters": "Production,Consumption,FeedIn,Purchased",
         },
     )
 
     if data.get("error"):
         return data
 
-    meters = data.get("energyDetails", {}).get("meters", [])
+    meters = data.get("powerDetails", {}).get("meters", [])
 
     mapping = {
         "Production": "productionKwhUntilNow",
         "Consumption": "consumptionKwhUntilNow",
-        "SelfConsumption": "selfConsumptionKwhUntilNow",
         "FeedIn": "feedInKwhUntilNow",
         "Purchased": "purchasedKwhUntilNow",
     }
+
+    result = sum_power_details(meters, mapping)
+
+    production = result.get("productionKwhUntilNow", 0)
+    feed_in = result.get("feedInKwhUntilNow", 0)
+
+    result["selfConsumptionKwhUntilNow"] = round(
+        max(production - feed_in, 0),
+        3,
+    )
 
     return {
         "date": today,
         "from": f"{today} 00:00:00",
         "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        **sum_energy_details(meters, mapping),
-        "intervalsCount": max(
-            [len(meter.get("values", [])) for meter in meters] or [0]
-        ),
+        **result,
     }
 
 
@@ -410,34 +425,42 @@ def build_solaredge_month_payload():
     end_time = floor_to_quarter(now)
 
     data = fetch_solaredge(
-        "energyDetails",
+        "powerDetails",
         {
-            "timeUnit": "DAY",
+            "timeUnit": "QUARTER_OF_AN_HOUR",
             "startTime": f"{NEXUS_START_DATE} 00:00:00",
             "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
+            "meters": "Production,Consumption,FeedIn,Purchased",
         },
     )
 
     if data.get("error"):
         return data
 
-    meters = data.get("energyDetails", {}).get("meters", [])
+    meters = data.get("powerDetails", {}).get("meters", [])
 
     mapping = {
         "Production": "productionKwhMonth",
         "Consumption": "consumptionKwhMonth",
-        "SelfConsumption": "selfConsumptionKwhMonth",
         "FeedIn": "feedInKwhMonth",
         "Purchased": "purchasedKwhMonth",
     }
 
+    result = sum_power_details(meters, mapping)
+
+    production = result.get("productionKwhMonth", 0)
+    feed_in = result.get("feedInKwhMonth", 0)
+
+    result["selfConsumptionKwhMonth"] = round(
+        max(production - feed_in, 0),
+        3,
+    )
+
     return {
         "from": f"{NEXUS_START_DATE} 00:00:00",
         "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        **sum_energy_details(meters, mapping),
+        **result,
     }
-
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE ENDPOINTS                                                         ║
 # ╚════════════════════════════════════════════════════════════╝
