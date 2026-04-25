@@ -334,9 +334,7 @@ def build_solaredge_current_payload():
     }
 
 
-# 🔍 DEBUG REAL DE METERS
-
-def build_solaredge_power_debug_payload():
+def build_solaredge_quarters_today_payload():
     now = get_local_now()
     end_time = floor_to_quarter(now)
     today = end_time.date().isoformat()
@@ -347,7 +345,7 @@ def build_solaredge_power_debug_payload():
             "timeUnit": "QUARTER_OF_AN_HOUR",
             "startTime": f"{today} 00:00:00",
             "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
+            "meters": "Production,Consumption,SelfConsumption,FeedIn",
         },
     )
 
@@ -356,19 +354,108 @@ def build_solaredge_power_debug_payload():
 
     meters = data.get("powerDetails", {}).get("meters", [])
 
+    production = 0
+    consumption = 0
+    self_consumption = 0
+    feed = 0
+
+    for m in meters:
+        m_type = m.get("type")
+
+        for v in m.get("values", []):
+            val = v.get("value")
+
+            if val is None:
+                continue
+
+            val = float(val)
+            kwh = val * 0.25 / 1000
+
+            if m_type == "Production":
+                production += kwh
+
+            elif m_type == "Consumption":
+                consumption += kwh
+
+            elif m_type == "SelfConsumption":
+                self_consumption += kwh
+
+            elif m_type == "FeedIn":
+                feed += kwh
+
+    # 🔥 CLAVE REAL
+    grid = max(consumption - self_consumption, 0)
+
     return {
         "date": today,
         "from": f"{today} 00:00:00",
         "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        "meters": [
-            {
-                "type": meter.get("type"),
-                "valuesCount": len(meter.get("values", [])),
-                "firstValues": meter.get("values", [])[:5],
-                "lastValues": meter.get("values", [])[-5:],
-            }
-            for meter in meters
-        ],
+        "productionKwhUntilNow": round(production, 3),
+        "consumptionKwhUntilNow": round(consumption, 3),
+        "selfConsumptionKwhUntilNow": round(self_consumption, 3),
+        "feedInKwhUntilNow": round(feed, 3),
+        "purchasedKwhUntilNow": round(grid, 3),
+    }
+
+
+def build_solaredge_month_payload():
+    now = get_local_now()
+    end_time = floor_to_quarter(now)
+
+    data = fetch_solaredge(
+        "powerDetails",
+        {
+            "timeUnit": "QUARTER_OF_AN_HOUR",
+            "startTime": f"{NEXUS_START_DATE} 00:00:00",
+            "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "meters": "Production,Consumption,SelfConsumption,FeedIn",
+        },
+    )
+
+    if data.get("error"):
+        return data
+
+    meters = data.get("powerDetails", {}).get("meters", [])
+
+    production = 0
+    consumption = 0
+    self_consumption = 0
+    feed = 0
+
+    for m in meters:
+        m_type = m.get("type")
+
+        for v in m.get("values", []):
+            val = v.get("value")
+
+            if val is None:
+                continue
+
+            val = float(val)
+            kwh = val * 0.25 / 1000
+
+            if m_type == "Production":
+                production += kwh
+
+            elif m_type == "Consumption":
+                consumption += kwh
+
+            elif m_type == "SelfConsumption":
+                self_consumption += kwh
+
+            elif m_type == "FeedIn":
+                feed += kwh
+
+    grid = max(consumption - self_consumption, 0)
+
+    return {
+        "from": f"{NEXUS_START_DATE} 00:00:00",
+        "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "productionKwhMonth": round(production, 3),
+        "consumptionKwhMonth": round(consumption, 3),
+        "selfConsumptionKwhMonth": round(self_consumption, 3),
+        "feedInKwhMonth": round(feed, 3),
+        "purchasedKwhMonth": round(grid, 3),
     }
 
 # ╔════════════════════════════════════════════════════════════╗
