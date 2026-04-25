@@ -510,11 +510,20 @@ def get_solaredge_power_debug():
     return build_solaredge_power_debug_payload()
 
 
-# 🔥 NUEVO: METERS (contador real)
 @app.get("/solar-edge/meters")
 def get_solar_edge_meters():
-    data = fetch_solaredge("meters")
-    return data
+    now = get_local_now()
+    today = now.date().isoformat()
+
+    return fetch_solaredge(
+        "meters",
+        {
+            "timeUnit": "QUARTER_OF_AN_HOUR",
+            "startTime": f"{today} 00:00:00",
+            "endTime": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "meters": "Production,Consumption,FeedIn,Purchased",
+        },
+    )
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE IMPORT ENDPOINTS                                      ║
 # ╚════════════════════════════════════════════════════════════╝
