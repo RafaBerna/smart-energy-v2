@@ -10,9 +10,14 @@ import {
   fetchSolarEdgeMonth,
 } from "../services/api";
 
+
 // ╔════════════════════════════════════════════════════════════╗
 // ║ HELPERS                                                    ║
 // ╚════════════════════════════════════════════════════════════╝
+
+// ──────────────────────────────
+// UNIT CONVERSION
+// ──────────────────────────────
 
 function toKwh(value) {
   if (value === undefined || value === null) return 0;
@@ -25,6 +30,11 @@ function toKw(value) {
   return Number(value) / 1000;
 }
 
+
+// ──────────────────────────────
+// FORMATTERS
+// ──────────────────────────────
+
 function formatPrice(value) {
   if (value === undefined || value === null) return "0.00000";
   return Number(value).toFixed(5);
@@ -35,9 +45,14 @@ function formatEnergy(value) {
   return Number(value).toFixed(2);
 }
 
+
 // ╔════════════════════════════════════════════════════════════╗
 // ║ PRICE ENGINE                                               ║
 // ╚════════════════════════════════════════════════════════════╝
+
+// ──────────────────────────────
+// FINAL PRICE PER HOUR
+// ──────────────────────────────
 
 function buildHoursWithFinal(hoursData) {
   if (!hoursData?.hours || !hoursData?.date) return [];
@@ -53,9 +68,14 @@ function buildHoursWithFinal(hoursData) {
   });
 }
 
+
 // ╔════════════════════════════════════════════════════════════╗
 // ║ SOLAREDGE ENGINE                                           ║
 // ╚════════════════════════════════════════════════════════════╝
+
+// ──────────────────────────────
+// REALTIME MESSAGE
+// ──────────────────────────────
 
 function getRealtimeMessage(excessKw, currentPrice) {
   if (excessKw >= 2) {
@@ -73,17 +93,27 @@ function getRealtimeMessage(excessKw, currentPrice) {
   return "No hay excedente claro. Mejor evitar consumos fuertes.";
 }
 
+
 // ╔════════════════════════════════════════════════════════════╗
 // ║ COMPONENT                                                  ║
 // ╚════════════════════════════════════════════════════════════╝
 
 function Home() {
+  // ──────────────────────────────
+  // STATE
+  // ──────────────────────────────
+
   const [data, setData] = useState(null);
   const [hoursData, setHoursData] = useState(null);
   const [solarCurrent, setSolarCurrent] = useState(null);
   const [solarDay, setSolarDay] = useState(null);
   const [solarMonth, setSolarMonth] = useState(null);
   const [error, setError] = useState("");
+
+
+  // ──────────────────────────────
+  // DATA LOAD
+  // ──────────────────────────────
 
   useEffect(() => {
     async function loadData() {
@@ -112,6 +142,11 @@ function Home() {
     loadData();
   }, []);
 
+
+  // ──────────────────────────────
+  // DERIVED DATE
+  // ──────────────────────────────
+
   const formattedDate = useMemo(() => {
     if (!data?.date) return "";
 
@@ -122,6 +157,11 @@ function Home() {
       year: "numeric",
     });
   }, [data]);
+
+
+  // ──────────────────────────────
+  // DERIVED PRICE DATA
+  // ──────────────────────────────
 
   const hoursWithFinalPrice = useMemo(() => {
     return buildHoursWithFinal(hoursData);
@@ -136,12 +176,22 @@ function Home() {
 
   const currentPrice = currentHourData?.finalPrice ?? 0;
 
+
+  // ──────────────────────────────
+  // DERIVED SOLAREDGE DATA
+  // ──────────────────────────────
+
   const productionKw = toKw(solarCurrent?.productionPowerW);
   const consumptionKw = toKw(solarCurrent?.consumptionPowerW);
   const excessKw = toKw(solarCurrent?.excessPowerW);
   const balanceKw = toKw(solarCurrent?.balancePowerW);
 
   const realtimeMessage = getRealtimeMessage(excessKw, currentPrice);
+
+
+  // ──────────────────────────────
+  // RENDER ERROR
+  // ──────────────────────────────
 
   if (error) {
     return (
@@ -156,6 +206,11 @@ function Home() {
     );
   }
 
+
+  // ──────────────────────────────
+  // RENDER LOADING
+  // ──────────────────────────────
+
   if (!data || !hoursData) {
     return (
       <div style={styles.page}>
@@ -165,6 +220,11 @@ function Home() {
       </div>
     );
   }
+
+
+  // ──────────────────────────────
+  // RENDER PAGE
+  // ──────────────────────────────
 
   return (
     <div style={styles.page}>
