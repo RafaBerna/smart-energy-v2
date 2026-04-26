@@ -318,7 +318,15 @@ def process_date(date_iso, date_compact, html):
 # ──────────────────────────────
 
 def process_latest_available(html):
-    # Primero intenta hoy
+    # Primero intenta mañana
+    tomorrow_iso, tomorrow_compact = get_date_from_offset(-1)
+
+    if process_date(tomorrow_iso, tomorrow_compact, html):
+        return
+
+    print("\nNo hay datos de mañana. Se intenta con hoy...")
+
+    # Si mañana no existe, prueba hoy
     today_iso, today_compact = get_date_from_offset(0)
 
     if process_date(today_iso, today_compact, html):
@@ -326,14 +334,13 @@ def process_latest_available(html):
 
     print("\nNo hay datos de hoy. Se intenta con ayer...")
 
-    # Si hoy no existe, prueba ayer
+    # Fallback de seguridad
     yesterday_iso, yesterday_compact = get_date_from_offset(1)
 
     if process_date(yesterday_iso, yesterday_compact, html):
         return
 
-    print("\nNo se encontraron datos ni para hoy ni para ayer.")
-
+    print("\nNo se encontraron datos ni para mañana, ni para hoy, ni para ayer.")
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ CLI EXECUTION                                              ║
