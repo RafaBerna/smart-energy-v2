@@ -1051,7 +1051,6 @@ def import_omie_range(start: str, end: str):
 @app.get("/datadis-days/latest")
 def get_latest_datadis_day():
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     row = cursor.execute("""
@@ -1096,5 +1095,69 @@ def get_latest_datadis_day():
         "qualityNote": row["quality_note"],
         "sourceFile": row["source_file"],
         "updatedAt": row["updated_at"],
+        "source": "datadis"
+    }
+
+
+@app.get("/datadis-days/period")
+def get_datadis_period(start: str = NEXUS_START_DATE, end: str | None = None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    params = [start]
+
+    end_filter = ""
+    if end:
+        end_filter = "AND date <= ?"
+        params.append(end)
+
+    summary = cursor.execute(f"""
+        SELECT
+            ROUND(SUM(grid_consumed_kwh), 3) AS grid_consumed_kwh,
+            ROUND(SUM(feed_in_kwh), 3) AS feed_in_kwh,
+            COUNT(*) AS days_count,
+            MIN(date) AS first_date,
+            MAX(date) AS last_date
+        FROM datadis_days
+        WHERE date >= ?
+          AND is_complete = 1
+          {end_filter}
+    """, params).fetchone()
+
+    incomplete_days = cursor.execute(f"""
+        SELECT
+            date,
+            hours_count,
+            expected_hours,
+            data_quality,
+            quality_note
+        FROM datadis_days
+        WHERE date >= ?
+          AND is_complete = 0
+          {end_filter}
+        ORDER BY date
+    """, params).fetchall()
+
+    conn.close()
+
+    return {
+        "status": "ok",
+        "startDate": start,
+        "endDate": end,
+        "firstAvailableDate": summary["first_date"],
+        "lastAvailableDate": summary["last_date"],
+        "daysCount": summary["days_count"],
+        "gridConsumedKwh": summary["grid_consumed_kwh"] or 0,
+        "feedInKwh": summary["feed_in_kwh"] or 0,
+        "excludedDays": [
+            {
+                "date": row["date"],
+                "hoursCount": row["hours_count"],
+                "expectedHours": row["expected_hours"],
+                "dataQuality": row["data_quality"],
+                "qualityNote": row["quality_note"],
+            }
+            for row in incomplete_days
+        ],
         "source": "datadis"
     }
