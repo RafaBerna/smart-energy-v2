@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ APP CONFIGURATION                                          ║
+# ║ APP CONFIGURATION                                                      ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -40,7 +40,7 @@ SOLAREDGE_SITE_ID = os.getenv("SOLAREDGE_SITE_ID")
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ GENERAL CONFIGURATION                                      ║
+# ║ GENERAL CONFIGURATION                                                  ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -58,7 +58,7 @@ NEXUS_START_DATE = "2026-04-04"
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ DATABASE                                                   ║
+# ║ DATABASE                                                               ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -90,7 +90,7 @@ def get_db_connection():
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE DATA                                                  ║
+# ║ OMIE DATA                                                              ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -336,7 +336,7 @@ def build_price_days_history_payload(limit: int = 30):
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ SOLAREDGE DATA                                             ║
+# ║ SOLAREDGE DATA                                                         ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -616,9 +616,124 @@ def build_solaredge_meters_payload():
         },
     )
 
+# ──────────────────────────────
+# SOLAREDGE STORAGE
+# ──────────────────────────────
+
+def get_solar_period_from_measurement_time(measurement_time: str):
+    dt = datetime.strptime(measurement_time, "%Y-%m-%d %H:%M:%S")
+    return (dt.hour * 4) + (dt.minute // 15) + 1
+
+
+def build_solaredge_update_today_payload():
+    power_data = build_solaredge_power_quarters_today_payload()
+
+    if power_data.get("error"):
+        return power_data
+
+    date = power_data.get("date")
+    quarters = power_data.get("quarters", [])
+
+    if not date or not quarters:
+        return {
+            "status": "empty",
+            "date": date,
+            "message": "No hay datos SolarEdge para guardar",
+        }
+
+    quarters = sorted(quarters, key=lambda q: q["date"])
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    grid_consumed_total_raw = 0
+    feed_in_total_raw = 0
+    last_measurement_at = None
+
+    for quarter in quarters:
+        measurement_time = quarter["date"]
+        period = get_solar_period_from_measurement_time(measurement_time)
+
+        grid_consumed_raw = float(quarter.get("purchasedWh", 0) or 0)
+        feed_in_raw = float(quarter.get("feedInWh", 0) or 0)
+
+        grid_consumed_total_raw += grid_consumed_raw
+        feed_in_total_raw += feed_in_raw
+        last_measurement_at = measurement_time
+
+        cursor.execute("""
+            INSERT INTO solar_quarters (
+                date,
+                period,
+                measurement_time,
+                grid_consumed_raw,
+                feed_in_raw,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(date, period)
+            DO UPDATE SET
+                measurement_time = excluded.measurement_time,
+                grid_consumed_raw = excluded.grid_consumed_raw,
+                feed_in_raw = excluded.feed_in_raw,
+                updated_at = CURRENT_TIMESTAMP
+        """, (
+            date,
+            period,
+            measurement_time,
+            grid_consumed_raw,
+            feed_in_raw,
+        ))
+
+    grid_consumed_kwh = grid_consumed_total_raw / 1000
+    feed_in_kwh = feed_in_total_raw / 1000
+    intervals_count = len(quarters)
+
+    cursor.execute("""
+        INSERT INTO solar_days (
+            date,
+            grid_consumed_kwh,
+            feed_in_kwh,
+            intervals_count,
+            last_measurement_at,
+            is_complete,
+            source,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, 0, 'solaredge_power', CURRENT_TIMESTAMP)
+        ON CONFLICT(date)
+        DO UPDATE SET
+            grid_consumed_kwh = excluded.grid_consumed_kwh,
+            feed_in_kwh = excluded.feed_in_kwh,
+            intervals_count = excluded.intervals_count,
+            last_measurement_at = excluded.last_measurement_at,
+            is_complete = excluded.is_complete,
+            source = excluded.source,
+            updated_at = CURRENT_TIMESTAMP
+    """, (
+        date,
+        grid_consumed_kwh,
+        feed_in_kwh,
+        intervals_count,
+        last_measurement_at,
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "status": "ok",
+        "date": date,
+        "gridConsumedKwh": round(grid_consumed_kwh, 3),
+        "feedInKwh": round(feed_in_kwh, 3),
+        "intervalsCount": intervals_count,
+        "lastMeasurementAt": last_measurement_at,
+        "source": "solaredge_power",
+    }
+
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE ENDPOINTS                                             ║
+# ║ OMIE ENDPOINTS                                                         ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -664,7 +779,7 @@ def get_price_days_history(limit: int = 30):
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ SOLAREDGE ENDPOINTS                                        ║
+# ║ SOLAREDGE ENDPOINTS                                                    ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -707,9 +822,16 @@ def get_solaredge_month():
 def get_solar_edge_meters():
     return build_solaredge_meters_payload()
 
+# ──────────────────────────────
+# STORAGE
+# ──────────────────────────────
+
+@app.get("/solar-edge/update-today")
+def update_solaredge_today():
+    return build_solaredge_update_today_payload()
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE IMPORT ENDPOINTS                                      ║
+# ║ OMIE IMPORT ENDPOINTS                                                  ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
