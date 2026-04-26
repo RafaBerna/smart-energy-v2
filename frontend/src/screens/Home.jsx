@@ -169,17 +169,11 @@ function Home() {
   return (
     <div style={styles.page}>
       <div style={styles.phone}>
-        {/* ────────────────────────────── */}
-        {/* HEADER                        */}
-        {/* ────────────────────────────── */}
         <header style={styles.appHeader}>
           <div style={styles.appName}>Smart Energy</div>
           <div style={styles.appDate}>{formattedDate}</div>
         </header>
 
-        {/* ────────────────────────────── */}
-        {/* TIEMPO REAL                   */}
-        {/* ────────────────────────────── */}
         <section style={homeStyles.infoCard}>
           <div style={homeStyles.infoTitle}>Tiempo real</div>
 
@@ -224,31 +218,16 @@ function Home() {
           )}
         </section>
 
-        {/* ────────────────────────────── */}
-        {/* ACUMULADO DÍA                 */}
-        {/* ────────────────────────────── */}
         <section style={homeStyles.infoCard}>
           <div style={homeStyles.infoTitle}>Acumulado día</div>
 
           {solarDay ? (
             <>
               <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                <div>
-                  ☀️ Producción:{" "}
-                  {formatEnergy(solarDay.productionKwhUntilNow)} kWh
-                </div>
-                <div>
-                  🏠 Solar consumida:{" "}
-                  {formatEnergy(solarDay.selfConsumptionKwhUntilNow)} kWh
-                </div>
-                <div>
-                  📥 Red consumida:{" "}
-                  {formatEnergy(solarDay.purchasedKwhUntilNow)} kWh
-                </div>
-                <div>
-                  📤 Vertido a red:{" "}
-                  {formatEnergy(solarDay.feedInKwhUntilNow)} kWh
-                </div>
+                <div>☀️ Producción: {formatEnergy(solarDay.productionKwhUntilNow)} kWh</div>
+                <div>🏠 Solar consumida: {formatEnergy(solarDay.selfConsumptionKwhUntilNow)} kWh</div>
+                <div>📥 Red consumida: {formatEnergy(solarDay.purchasedKwhUntilNow)} kWh</div>
+                <div>📤 Vertido a red: {formatEnergy(solarDay.feedInKwhUntilNow)} kWh</div>
               </div>
 
               <div style={{ ...homeStyles.infoText, marginTop: 12 }}>
@@ -262,32 +241,25 @@ function Home() {
           )}
         </section>
 
-        {/* ────────────────────────────── */}
-        {/* ACUMULADO MES                 */}
-        {/* ────────────────────────────── */}
         <section style={homeStyles.infoCard}>
-          <div style={homeStyles.infoTitle}>Acumulado mes</div>
+          <div style={homeStyles.infoTitle}>Desde inicio contrato</div>
 
           {solarMonth ? (
-            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-              <div>
-                ☀️ Producción: {formatEnergy(solarMonth.productionKwhMonth)} kWh
+            <>
+              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                <div>☀️ Producción: {formatEnergy(solarMonth.productionKwhMonth)} kWh</div>
+                <div>🏠 Solar consumida: {formatEnergy(solarMonth.selfConsumptionKwhMonth)} kWh</div>
+                <div>📥 Red consumida: {formatEnergy(solarMonth.purchasedKwhMonth)} kWh</div>
+                <div>📤 Vertido a red: {formatEnergy(solarMonth.feedInKwhMonth)} kWh</div>
               </div>
-              <div>
-                🏠 Solar consumida:{" "}
-                {formatEnergy(solarMonth.selfConsumptionKwhMonth)} kWh
+
+              <div style={{ ...homeStyles.infoText, marginTop: 12 }}>
+                Desde 04/04/2026
               </div>
-              <div>
-                📥 Red consumida:{" "}
-                {formatEnergy(solarMonth.purchasedKwhMonth)} kWh
-              </div>
-              <div>
-                📤 Vertido a red: {formatEnergy(solarMonth.feedInKwhMonth)} kWh
-              </div>
-            </div>
+            </>
           ) : (
             <div style={homeStyles.infoText}>
-              Acumulado mensual pendiente de conectar.
+              Acumulado desde inicio de contrato pendiente de conectar.
             </div>
           )}
         </section>

@@ -489,16 +489,17 @@ def build_solaredge_month_payload():
 
             result[key] += float(value) / 1000
 
-    return {
-        "from": f"{NEXUS_START_DATE} 00:00:00",
-        "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        "productionKwhMonth": round(result["productionKwhMonth"], 3),
-        "consumptionKwhMonth": round(result["consumptionKwhMonth"], 3),
-        "selfConsumptionKwhMonth": round(result["selfConsumptionKwhMonth"], 3),
-        "feedInKwhMonth": round(result["feedInKwhMonth"], 3),
-        "purchasedKwhMonth": round(result["purchasedKwhMonth"], 3),
-        "intervalsCount": intervals_count,
-    }
+  return {
+    "from": f"{NEXUS_START_DATE} 00:00:00",
+    "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+    "label": "Desde inicio contrato",
+    "productionKwh": round(result["productionKwhMonth"], 3),
+    "consumptionKwh": round(result["consumptionKwhMonth"], 3),
+    "selfConsumptionKwh": round(result["selfConsumptionKwhMonth"], 3),
+    "feedInKwh": round(result["feedInKwhMonth"], 3),
+    "purchasedKwh": round(result["purchasedKwhMonth"], 3),
+    "intervalsCount": intervals_count,
+}
 
 
 def build_solaredge_meters_payload():
