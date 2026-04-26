@@ -1,3 +1,4 @@
+from statistics import median
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
@@ -1041,7 +1042,7 @@ def import_omie_range(start: str, end: str):
     }
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ DATADIS / E-DISTRIBUCIÓN DATA                              ║
+# ║ DATADIS / E-DISTRIBUCIÓN DATA                                          ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -1160,4 +1161,158 @@ def get_datadis_period(start: str = NEXUS_START_DATE, end: str | None = None):
             for row in incomplete_days
         ],
         "source": "datadis"
+    }
+
+# ╔════════════════════════════════════════════════════════════╗
+# ║ ENERGY INTELLIGENCE                                                    ║
+# ╚════════════════════════════════════════════════════════════╝
+
+# ──────────────────────────────
+# DAILY FINGERPRINTS
+# ──────────────────────────────
+
+@app.get("/energy-intelligence/daily-fingerprints")
+def get_daily_energy_fingerprints(
+    start: str = "2026-03-01",
+    end: str | None = None,
+    includeEstimated: bool = False
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    params = [start]
+
+    end_filter = ""
+    if end:
+        end_filter = "AND d.date <= ?"
+        params.append(end)
+
+    datadis_quality_filter = "AND d.data_quality = 'complete_real'"
+
+    if includeEstimated:
+        datadis_quality_filter = "AND d.data_quality IN ('complete_real', 'complete_mixed')"
+
+    rows = cursor.execute(f"""
+        SELECT
+            d.date,
+            d.grid_consumed_kwh,
+            d.feed_in_kwh,
+            d.is_complete,
+            d.data_quality AS datadis_quality,
+
+            w.temp_avg_c,
+            w.temp_max_c,
+            w.cloud_cover_avg_percent,
+            w.shortwave_radiation_sum,
+            w.direct_radiation_sum,
+            w.sunshine_duration_seconds,
+            w.precipitation_sum_mm,
+            w.solar_quality,
+            w.data_quality AS weather_quality
+        FROM datadis_days d
+        JOIN weather_days w
+          ON d.date = w.date
+        WHERE d.date >= ?
+          AND d.is_complete = 1
+          {datadis_quality_filter}
+          AND w.data_quality = 'complete'
+          {end_filter}
+        ORDER BY d.date
+    """, params).fetchall()
+
+    conn.close()
+
+    base = []
+
+    for row in rows:
+        radiation = row["shortwave_radiation_sum"] or 0
+        feed_in = row["feed_in_kwh"] or 0
+        grid = row["grid_consumed_kwh"] or 0
+
+        feed_in_per_radiation = None
+        grid_per_radiation = None
+
+        if radiation > 0:
+            feed_in_per_radiation = feed_in / radiation
+            grid_per_radiation = grid / radiation
+
+        base.append({
+            "date": row["date"],
+            "gridConsumedKwh": grid,
+            "feedInKwh": feed_in,
+            "tempAvgC": row["temp_avg_c"],
+            "tempMaxC": row["temp_max_c"],
+            "cloudCoverAvgPercent": row["cloud_cover_avg_percent"],
+            "shortwaveRadiationSum": radiation,
+            "directRadiationSum": row["direct_radiation_sum"],
+            "sunshineDurationSeconds": row["sunshine_duration_seconds"],
+            "precipitationSumMm": row["precipitation_sum_mm"],
+            "solarQuality": row["solar_quality"],
+            "feedInPerRadiation": feed_in_per_radiation,
+            "gridPerRadiation": grid_per_radiation,
+            "datadisQuality": row["datadis_quality"],
+            "weatherQuality": row["weather_quality"],
+        })
+
+    valid_ratios = [
+        item["feedInPerRadiation"]
+        for item in base
+        if item["feedInPerRadiation"] is not None
+        and item["solarQuality"] in ("sunny", "mostly_sunny")
+        and item["datadisQuality"] == "complete_real"
+    ]
+
+    reference_ratio = median(valid_ratios) if valid_ratios else None
+
+    fingerprints = []
+
+    for item in base:
+        ratio = item["feedInPerRadiation"]
+        solar_quality = item["solarQuality"]
+
+        hidden_consumption_signal = "unknown"
+        day_type = "unknown"
+        interpretation = "Datos insuficientes para clasificar"
+
+        if reference_ratio and ratio is not None:
+            if solar_quality in ("sunny", "mostly_sunny"):
+                if ratio < reference_ratio * 0.80:
+                    hidden_consumption_signal = "high"
+                    day_type = "sunny_low_export"
+                    interpretation = "Día con buen sol pero vertido bajo: probable consumo interno fuerte cubierto por solar"
+                elif ratio < reference_ratio * 0.92:
+                    hidden_consumption_signal = "medium"
+                    day_type = "sunny_moderate_export"
+                    interpretation = "Día con buen sol y vertido algo inferior al patrón"
+                else:
+                    hidden_consumption_signal = "low"
+                    day_type = "sunny_clean_export"
+                    interpretation = "Día soleado con vertido normal o alto"
+            elif solar_quality == "mixed":
+                hidden_consumption_signal = "medium"
+                day_type = "mixed_solar"
+                interpretation = "Día mixto: la bajada de vertido puede venir de nubes o consumo"
+            else:
+                hidden_consumption_signal = "low"
+                day_type = "cloudy_low_solar"
+                interpretation = "Día con baja calidad solar: menor vertido probablemente por clima"
+
+        fingerprints.append({
+            **item,
+            "referenceFeedInPerRadiation": reference_ratio,
+            "hiddenConsumptionSignal": hidden_consumption_signal,
+            "dayType": day_type,
+            "interpretation": interpretation,
+        })
+
+    return {
+        "status": "ok",
+        "startDate": start,
+        "endDate": end,
+        "includeEstimated": includeEstimated,
+        "qualityMode": "real_and_estimated" if includeEstimated else "real_only",
+        "daysCount": len(fingerprints),
+        "referenceFeedInPerRadiation": reference_ratio,
+        "items": fingerprints,
+        "source": "datadis_weather"
     }
