@@ -625,9 +625,59 @@ def get_solar_period_from_measurement_time(measurement_time: str):
     return (dt.hour * 4) + (dt.minute // 15) + 1
 
 
-def build_solaredge_update_today_payload():
-    power_data = build_solaredge_power_quarters_today_payload()
+def build_solaredge_power_quarters_by_date_payload(target_date: str):
+    data = fetch_solaredge(
+        "powerDetails",
+        {
+            "timeUnit": "QUARTER_OF_AN_HOUR",
+            "startTime": f"{target_date} 00:00:00",
+            "endTime": f"{target_date} 23:59:59",
+            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
+        },
+    )
 
+    if data.get("error"):
+        return data
+
+    meters = data.get("powerDetails", {}).get("meters", [])
+    quarters = {}
+
+    for meter in meters:
+        meter_type = meter.get("type")
+
+        for item in meter.get("values", []):
+            date = item.get("date")
+            value = item.get("value")
+
+            if not date:
+                continue
+
+            if date not in quarters:
+                quarters[date] = {
+                    "date": date,
+                    "feedInWh": 0,
+                    "purchasedWh": 0,
+                }
+
+            if value is None:
+                continue
+
+            value = float(value)
+
+            if meter_type == "FeedIn":
+                quarters[date]["feedInWh"] = value
+            elif meter_type == "Purchased":
+                quarters[date]["purchasedWh"] = value
+
+    return {
+        "date": target_date,
+        "from": f"{target_date} 00:00:00",
+        "to": f"{target_date} 23:59:59",
+        "quarters": list(quarters.values()),
+    }
+
+
+def save_solaredge_power_day_to_db(power_data, is_complete: int = 0):
     if power_data.get("error"):
         return power_data
 
@@ -700,7 +750,7 @@ def build_solaredge_update_today_payload():
             source,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, 0, 'solaredge_power', CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, 'solaredge_power', CURRENT_TIMESTAMP)
         ON CONFLICT(date)
         DO UPDATE SET
             grid_consumed_kwh = excluded.grid_consumed_kwh,
@@ -716,6 +766,7 @@ def build_solaredge_update_today_payload():
         feed_in_kwh,
         intervals_count,
         last_measurement_at,
+        is_complete,
     ))
 
     conn.commit()
@@ -728,9 +779,22 @@ def build_solaredge_update_today_payload():
         "feedInKwh": round(feed_in_kwh, 3),
         "intervalsCount": intervals_count,
         "lastMeasurementAt": last_measurement_at,
+        "isComplete": bool(is_complete),
         "source": "solaredge_power",
     }
 
+
+def build_solaredge_update_today_payload():
+    power_data = build_solaredge_power_quarters_today_payload()
+    return save_solaredge_power_day_to_db(power_data, is_complete=0)
+
+
+def build_solaredge_update_date_payload(target_date: str):
+    today = get_local_now().date().isoformat()
+    is_complete = 0 if target_date == today else 1
+
+    power_data = build_solaredge_power_quarters_by_date_payload(target_date)
+    return save_solaredge_power_day_to_db(power_data, is_complete=is_complete)
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE ENDPOINTS                                                         ║
@@ -829,6 +893,11 @@ def get_solar_edge_meters():
 @app.get("/solar-edge/update-today")
 def update_solaredge_today():
     return build_solaredge_update_today_payload()
+
+
+@app.get("/solar-edge/update-date")
+def update_solaredge_date(date: str):
+    return build_solaredge_update_date_payload(date)
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE IMPORT ENDPOINTS                                                  ║
