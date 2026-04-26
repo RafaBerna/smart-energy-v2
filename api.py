@@ -1,5 +1,6 @@
+from pathlib import Path
 from statistics import median
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 import requests
@@ -1162,6 +1163,84 @@ def get_datadis_period(start: str = NEXUS_START_DATE, end: str | None = None):
         ],
         "source": "datadis"
     }
+
+# ╔════════════════════════════════════════════════════════════╗
+# ║ ADMIN IMPORTS                                                          ║
+# ╚════════════════════════════════════════════════════════════╝
+
+# ──────────────────────────────
+# DATADIS JSON IMPORT
+# ──────────────────────────────
+
+@app.post("/admin/import-datadis-json")
+async def admin_import_datadis_json(
+    request: Request,
+    filename: str = "datadis.json",
+    x_admin_token: str | None = Header(default=None)
+):
+    admin_token = os.getenv("ADMIN_TOKEN")
+
+    if not admin_token:
+        raise HTTPException(
+            status_code=500,
+            detail="ADMIN_TOKEN is not configured"
+        )
+
+    if x_admin_token != admin_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid admin token"
+        )
+
+    payload = await request.json()
+
+    if not isinstance(payload, list):
+        raise HTTPException(
+            status_code=400,
+            detail="Datadis JSON must be a list of records"
+        )
+
+    safe_filename = (
+        filename
+        .replace("\\", "_")
+        .replace("/", "_")
+        .replace("..", "_")
+    )
+
+    temp_dir = Path("/tmp") if os.path.exists("/tmp") else Path("data/tmp")
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    file_path = temp_dir / safe_filename
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+
+    from scripts.import_datadis_json import import_file
+
+    conn = get_db_connection()
+
+    try:
+        result = import_file(conn, file_path)
+        conn.commit()
+
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Datadis import failed: {exc}"
+        )
+
+    finally:
+        conn.close()
+
+    return {
+        "status": "ok",
+        "filename": safe_filename,
+        "records": result["records"],
+        "days": result["days"],
+        "source": "admin_datadis_import"
+    }
+
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ ENERGY INTELLIGENCE                                                    ║
