@@ -20,7 +20,7 @@ SOLAREDGE_API_KEY = os.getenv("SOLAREDGE_API_KEY")
 SOLAREDGE_SITE_ID = os.getenv("SOLAREDGE_SITE_ID")
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ DATABASE                                                   ║
+# ║ DATABASE                                                               ║
 # ╚════════════════════════════════════════════════════════════╝
 
 def init_db():
@@ -41,7 +41,7 @@ def get_db_connection():
     return conn
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ DATES                                                      ║
+# ║ DATES                                                                  ║
 # ╚════════════════════════════════════════════════════════════╝
 
 def get_today_date():
@@ -51,7 +51,7 @@ def get_tomorrow_date():
     return (datetime.now().date() + timedelta(days=1)).isoformat()
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE DATA                                                  ║
+# ║ OMIE DATA                                                              ║
 # ╚════════════════════════════════════════════════════════════╝
 
 def get_latest_day_row():
@@ -262,7 +262,7 @@ def build_price_days_history_payload(limit: int = 30):
     }
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ SOLAREDGE DATA                                             ║
+# ║ SOLAREDGE DATA                                                         ║
 # ╚════════════════════════════════════════════════════════════╝
 
 NEXUS_START_DATE = "2026-04-04"
@@ -490,16 +490,16 @@ def build_solaredge_month_payload():
             result[key] += float(value) / 1000
 
   return {
-    "from": f"{NEXUS_START_DATE} 00:00:00",
-    "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-    "label": "Desde inicio contrato",
-    "productionKwh": round(result["productionKwhMonth"], 3),
-    "consumptionKwh": round(result["consumptionKwhMonth"], 3),
-    "selfConsumptionKwh": round(result["selfConsumptionKwhMonth"], 3),
-    "feedInKwh": round(result["feedInKwhMonth"], 3),
-    "purchasedKwh": round(result["purchasedKwhMonth"], 3),
-    "intervalsCount": intervals_count,
-}
+        "from": f"{NEXUS_START_DATE} 00:00:00",
+        "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "label": "Desde inicio contrato",
+        "productionKwh": round(result["productionKwhMonth"], 3),
+        "consumptionKwh": round(result["consumptionKwhMonth"], 3),
+        "selfConsumptionKwh": round(result["selfConsumptionKwhMonth"], 3),
+        "feedInKwh": round(result["feedInKwhMonth"], 3),
+        "purchasedKwh": round(result["purchasedKwhMonth"], 3),
+        "intervalsCount": intervals_count,
+    }
 
 
 def build_solaredge_meters_payload():
@@ -518,7 +518,7 @@ def build_solaredge_meters_payload():
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE ENDPOINTS                                             ║
+# ║ OMIE ENDPOINTS                                                         ║
 # ╚════════════════════════════════════════════════════════════╝
 
 @app.get("/price-day/latest")
@@ -552,7 +552,7 @@ def get_price_days_history(limit: int = 30):
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ SOLAREDGE ENDPOINTS                                        ║
+# ║ SOLAREDGE ENDPOINTS                                                    ║
 # ╚════════════════════════════════════════════════════════════╝
 
 @app.get("/solar-edge/current")
@@ -580,7 +580,7 @@ def get_solar_edge_meters():
     return build_solaredge_meters_payload()
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE IMPORT ENDPOINTS                                      ║
+# ║ OMIE IMPORT ENDPOINTS                                                  ║
 # ╚════════════════════════════════════════════════════════════╝
 
 @app.get("/import-omie")
