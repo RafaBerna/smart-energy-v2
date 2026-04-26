@@ -6,19 +6,45 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 
+# ╔════════════════════════════════════════════════════════════╗
+# ║ CONFIGURATION                                              ║
+# ╚════════════════════════════════════════════════════════════╝
+
+# ──────────────────────────────
+# OMIE URLS
+# ──────────────────────────────
+
 OMIE_BASE_URL = "https://www.omie.es"
 OMIE_LIST_URL = (
     "https://www.omie.es/es/file-access-list?"
     "parents=Mercado%20Diario/1.%20Precios&dir=Precios%20horarios%20del%20mercado%20diario%20en%20Espa%C3%B1a"
     "&realdir=marginalpdbc"
 )
+
+
+# ──────────────────────────────
+# HTTP HEADERS
+# ──────────────────────────────
+
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
+
+# ╔════════════════════════════════════════════════════════════╗
+# ║ DATE HELPERS                                               ║
+# ╚════════════════════════════════════════════════════════════╝
+
+# ──────────────────────────────
+# DATE FROM OFFSET
+# ──────────────────────────────
 
 def get_date_from_offset(days_offset=0):
     target = datetime.now() - timedelta(days=days_offset)
     return target.strftime("%Y-%m-%d"), target.strftime("%Y%m%d")
 
+
+# ──────────────────────────────
+# DATE RANGE
+# ──────────────────────────────
 
 def get_date_range(start_date_str, end_date_str):
     start = datetime.strptime(start_date_str, "%Y-%m-%d")
@@ -34,17 +60,35 @@ def get_date_range(start_date_str, end_date_str):
     return dates
 
 
+# ╔════════════════════════════════════════════════════════════╗
+# ║ OMIE DOWNLOAD                                              ║
+# ╚════════════════════════════════════════════════════════════╝
+
+# ──────────────────────────────
+# FILE NAME
+# ──────────────────────────────
+
 def build_filename(date_compact, version=1):
     return f"marginalpdbc_{date_compact}.{version}"
 
 
+# ──────────────────────────────
+# LIST PAGE
+# ──────────────────────────────
+
 def fetch_list_page():
     response = requests.get(OMIE_LIST_URL, headers=HEADERS, timeout=20)
+
     if response.status_code != 200:
         print("Error listado OMIE:", response.status_code)
         return None
+
     return response.text
 
+
+# ──────────────────────────────
+# FIND DOWNLOAD URL
+# ──────────────────────────────
 
 def find_download_url(filename, html):
     soup = BeautifulSoup(html, "html.parser")
@@ -59,6 +103,10 @@ def find_download_url(filename, html):
     return None
 
 
+# ──────────────────────────────
+# FIND DOWNLOAD URL BY DATE
+# ──────────────────────────────
+
 def find_download_url_for_date(date_compact, html):
     for version in range(1, 6):
         filename = build_filename(date_compact, version)
@@ -71,16 +119,29 @@ def find_download_url_for_date(date_compact, html):
     return None
 
 
+# ──────────────────────────────
+# FETCH OMIE FILE
+# ──────────────────────────────
+
 def fetch_omie_file(download_url):
     print(f"Descargando: {download_url}")
 
     response = requests.get(download_url, headers=HEADERS, timeout=20)
+
     if response.status_code != 200:
         print("Error descarga:", response.status_code)
         return None
 
     return response.text
 
+
+# ╔════════════════════════════════════════════════════════════╗
+# ║ OMIE PARSING                                               ║
+# ╚════════════════════════════════════════════════════════════╝
+
+# ──────────────────────────────
+# REAL PERIODS
+# ──────────────────────────────
 
 def parse_omie_periods(text):
     lines = text.splitlines()
@@ -108,16 +169,26 @@ def parse_omie_periods(text):
     return period_prices
 
 
+# ╔════════════════════════════════════════════════════════════╗
+# ║ OMIE AGGREGATION                                           ║
+# ╚════════════════════════════════════════════════════════════╝
+
+# ──────────────────────────────
+# HOURS FROM PERIODS
+# ──────────────────────────────
+
 def build_hour_rows(period_prices):
     only_prices = [price for _, price in period_prices]
 
     if len(only_prices) == 96:
         hour_rows = []
+
         for i in range(0, 96, 4):
             block = only_prices[i:i + 4]
             hour = (i // 4) + 1
             avg_price = sum(block) / 4
             hour_rows.append((hour, avg_price))
+
         return hour_rows
 
     if len(only_prices) == 24:
@@ -125,6 +196,14 @@ def build_hour_rows(period_prices):
 
     raise ValueError(f"Unexpected number of periods: {len(only_prices)}")
 
+
+# ╔════════════════════════════════════════════════════════════╗
+# ║ DATABASE                                                   ║
+# ╚════════════════════════════════════════════════════════════╝
+
+# ──────────────────────────────
+# SAVE OMIE DAY
+# ──────────────────────────────
 
 def save_to_db(date_iso, period_prices, hour_rows):
     conn = sqlite3.connect("/data/omie.db")
@@ -201,6 +280,14 @@ def save_to_db(date_iso, period_prices, hour_rows):
     print(f"✔ Guardado {date_iso}")
 
 
+# ╔════════════════════════════════════════════════════════════╗
+# ║ PROCESSING                                                 ║
+# ╚════════════════════════════════════════════════════════════╝
+
+# ──────────────────────────────
+# PROCESS SINGLE DATE
+# ──────────────────────────────
+
 def process_date(date_iso, date_compact, html):
     print(f"\n--- Procesando {date_iso} ---")
 
@@ -211,6 +298,7 @@ def process_date(date_iso, date_compact, html):
         return False
 
     data = fetch_omie_file(download_url)
+
     if not data:
         return False
 
@@ -225,9 +313,14 @@ def process_date(date_iso, date_compact, html):
     return True
 
 
+# ──────────────────────────────
+# PROCESS LATEST AVAILABLE
+# ──────────────────────────────
+
 def process_latest_available(html):
     # Primero intenta hoy
     today_iso, today_compact = get_date_from_offset(0)
+
     if process_date(today_iso, today_compact, html):
         return
 
@@ -235,11 +328,20 @@ def process_latest_available(html):
 
     # Si hoy no existe, prueba ayer
     yesterday_iso, yesterday_compact = get_date_from_offset(1)
+
     if process_date(yesterday_iso, yesterday_compact, html):
         return
 
     print("\nNo se encontraron datos ni para hoy ni para ayer.")
 
+
+# ╔════════════════════════════════════════════════════════════╗
+# ║ CLI EXECUTION                                              ║
+# ╚════════════════════════════════════════════════════════════╝
+
+# ──────────────────────────────
+# MAIN
+# ──────────────────────────────
 
 if __name__ == "__main__":
 
@@ -250,6 +352,7 @@ if __name__ == "__main__":
         print(f"Cargando histórico: {start_date} → {end_date}")
 
         html = fetch_list_page()
+
         if not html:
             sys.exit(1)
 
@@ -261,6 +364,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     html = fetch_list_page()
+
     if not html:
         sys.exit(1)
 
