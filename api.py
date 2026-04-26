@@ -796,6 +796,61 @@ def build_solaredge_update_date_payload(target_date: str):
     power_data = build_solaredge_power_quarters_by_date_payload(target_date)
     return save_solaredge_power_day_to_db(power_data, is_complete=is_complete)
 
+
+def build_solaredge_update_range_payload(start: str, end: str):
+    try:
+        start_date = datetime.strptime(start, "%Y-%m-%d").date()
+        end_date = datetime.strptime(end, "%Y-%m-%d").date()
+    except ValueError:
+        return {
+            "status": "error",
+            "message": "Formato de fecha inválido. Usa YYYY-MM-DD",
+        }
+
+    if start_date > end_date:
+        return {
+            "status": "error",
+            "message": "La fecha inicial no puede ser posterior a la fecha final",
+        }
+
+    today = get_local_now().date()
+
+    if end_date > today:
+        return {
+            "status": "error",
+            "message": "No se pueden importar fechas futuras",
+        }
+
+    current = start_date
+    imported = 0
+    failed = []
+    results = []
+
+    while current <= end_date:
+        date_iso = current.isoformat()
+
+        result = build_solaredge_update_date_payload(date_iso)
+        results.append(result)
+
+        if result.get("status") == "ok":
+            imported += 1
+        else:
+            failed.append({
+                "date": date_iso,
+                "status": result.get("status"),
+                "message": result.get("message") or result.get("error"),
+            })
+
+        current += timedelta(days=1)
+
+    return {
+        "status": "ok",
+        "start": start,
+        "end": end,
+        "imported": imported,
+        "failed": failed,
+        "results": results,
+    }
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE ENDPOINTS                                                         ║
 # ╚════════════════════════════════════════════════════════════╝
@@ -898,6 +953,11 @@ def update_solaredge_today():
 @app.get("/solar-edge/update-date")
 def update_solaredge_date(date: str):
     return build_solaredge_update_date_payload(date)
+
+
+@app.get("/solar-edge/update-range")
+def update_solaredge_range(start: str, end: str):
+    return build_solaredge_update_range_payload(start, end)
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE IMPORT ENDPOINTS                                                  ║
