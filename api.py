@@ -517,6 +517,40 @@ def build_solaredge_meters_payload():
 
 
 # ╔════════════════════════════════════════════════════════════╗
+# ║ OMIE ENDPOINTS                                             ║
+# ╚════════════════════════════════════════════════════════════╝
+
+@app.get("/price-day/latest")
+def get_latest_price_day():
+    return build_day_payload(get_latest_day_row())
+
+
+@app.get("/price-hours/latest")
+def get_latest_price_hours():
+    return build_latest_hours_payload()
+
+
+@app.get("/price-periods/latest")
+def get_latest_periods():
+    return build_latest_periods_payload()
+
+
+@app.get("/price-hours/by-date")
+def get_price_hours_by_date(date: str):
+    return build_hours_payload_by_date(date)
+
+
+@app.get("/price-periods/by-date")
+def get_price_periods_by_date(date: str):
+    return build_periods_payload_by_date(date)
+
+
+@app.get("/price-days/history")
+def get_price_days_history(limit: int = 30):
+    return build_price_days_history_payload(limit)
+
+
+# ╔════════════════════════════════════════════════════════════╗
 # ║ SOLAREDGE ENDPOINTS                                        ║
 # ╚════════════════════════════════════════════════════════════╝
 
