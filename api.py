@@ -323,66 +323,7 @@ def build_solaredge_current_payload():
     }
 
 
-# 🔥 ACUMULADO DÍA (API energyDetails)
-
-def sum_energy_details(meters, mapping):
-    result = {value: 0 for value in mapping.values()}
-
-    for meter in meters:
-        meter_type = meter.get("type")
-        key = mapping.get(meter_type)
-
-        if not key:
-            continue
-
-        total_wh = sum(
-            float(item.get("value") or 0)
-            for item in meter.get("values", [])
-            if item.get("value") is not None
-        )
-
-        result[key] = round(total_wh / 1000, 3)
-
-    return result
-
-
-def build_solaredge_quarters_today_payload():
-    now = get_local_now()
-    end_time = floor_to_quarter(now)
-    today = end_time.date().isoformat()
-
-    data = fetch_solaredge(
-        "energyDetails",
-        {
-            "timeUnit": "QUARTER_OF_AN_HOUR",
-            "startTime": f"{today} 00:00:00",
-            "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
-        },
-    )
-
-    if data.get("error"):
-        return data
-
-    meters = data.get("energyDetails", {}).get("meters", [])
-
-    mapping = {
-        "Production": "productionKwhUntilNow",
-        "Consumption": "consumptionKwhUntilNow",
-        "SelfConsumption": "selfConsumptionKwhUntilNow",
-        "FeedIn": "feedInKwhUntilNow",
-        "Purchased": "purchasedKwhUntilNow",
-    }
-
-    return {
-        "date": today,
-        "from": f"{today} 00:00:00",
-        "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        **sum_energy_details(meters, mapping),
-    }
-
-
-# 🔥 POTENCIA POR CUARTOS (CLAVE)
+# 🔥 POTENCIA POR CUARTOS (BASE REAL)
 
 def build_solaredge_power_quarters_today_payload():
     now = get_local_now()
@@ -429,7 +370,7 @@ def build_solaredge_power_quarters_today_payload():
             if value is None:
                 continue
 
-            value = round(float(value), 2)
+            value = float(value)
 
             if meter_type == "Production":
                 quarters[date]["productionW"] = value
@@ -448,22 +389,59 @@ def build_solaredge_power_quarters_today_payload():
     }
 
 
-# 🔥 METERS (contador acumulado real)
+# 🔥 ACUMULADO DÍA CORRECTO (desde potencia)
 
-def build_solaredge_meters_payload():
-    now = get_local_now()
-    today = now.date().isoformat()
+def build_solaredge_quarters_today_payload():
+    power_data = build_solaredge_power_quarters_today_payload()
 
-    return fetch_solaredge(
-        "meters",
-        {
-            "timeUnit": "QUARTER_OF_AN_HOUR",
-            "startTime": f"{today} 00:00:00",
-            "endTime": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "meters": "Production,Consumption,FeedIn,Purchased",
-        },
-    )
+    if power_data.get("error"):
+        return power_data
 
+    quarters = power_data.get("quarters", [])
+
+    production_kwh = 0
+    consumption_kwh = 0
+    self_consumption_kwh = 0
+    feedin_kwh = 0
+    purchased_kwh = 0
+
+    for q in quarters:
+        production_kwh += q.get("productionW", 0) * 0.25 / 1000
+        consumption_kwh += q.get("consumptionW", 0) * 0.25 / 1000
+        self_consumption_kwh += q.get("selfConsumptionW", 0) * 0.25 / 1000
+        feedin_kwh += q.get("feedInW", 0) * 0.25 / 1000
+        purchased_kwh += q.get("purchasedW", 0) * 0.25 / 1000
+
+    return {
+        "date": power_data.get("date"),
+        "from": f"{power_data.get('date')} 00:00:00",
+        "to": quarters[-1]["date"] if quarters else None,
+        "productionKwhUntilNow": round(production_kwh, 3),
+        "consumptionKwhUntilNow": round(consumption_kwh, 3),
+        "selfConsumptionKwhUntilNow": round(self_consumption_kwh, 3),
+        "feedInKwhUntilNow": round(feedin_kwh, 3),
+        "purchasedKwhUntilNow": round(purchased_kwh, 3),
+        "intervalsCount": len(quarters),
+    }
+
+
+# ╔════════════════════════════════════════════════════════════╗
+# ║ SOLAREDGE ENDPOINTS                                        ║
+# ╚════════════════════════════════════════════════════════════╝
+
+@app.get("/solar-edge/current")
+def get_solaredge_current():
+    return build_solaredge_current_payload()
+
+
+@app.get("/solar-edge/quarters-today")
+def get_solaredge_quarters_today():
+    return build_solaredge_quarters_today_payload()
+
+
+@app.get("/solar-edge/power-quarters-today")
+def get_solaredge_power_quarters_today():
+    return build_solaredge_power_quarters_today_payload()
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ SOLAREDGE ENDPOINTS                                        ║
