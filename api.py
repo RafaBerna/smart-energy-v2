@@ -304,6 +304,10 @@ def floor_to_quarter(dt: datetime):
     return dt.replace(minute=minute, second=0, microsecond=0)
 
 
+# ──────────────────────────────
+# TIEMPO REAL
+# ──────────────────────────────
+
 def build_solaredge_current_payload():
     data = fetch_solaredge("currentPowerFlow")
 
@@ -334,6 +338,10 @@ def build_solaredge_current_payload():
         "raw": flow,
     }
 
+
+# ──────────────────────────────
+# CUARTOS HOY (RAW)
+# ──────────────────────────────
 
 def build_solaredge_power_quarters_today_payload():
     now = get_local_now()
@@ -400,6 +408,10 @@ def build_solaredge_power_quarters_today_payload():
     }
 
 
+# ──────────────────────────────
+# ACUMULADO DÍA
+# ──────────────────────────────
+
 def build_solaredge_quarters_today_payload():
     power_data = build_solaredge_power_quarters_today_payload()
 
@@ -408,107 +420,110 @@ def build_solaredge_quarters_today_payload():
 
     quarters = power_data.get("quarters", [])
 
-    production_kwh = 0
-    consumption_kwh = 0
-    self_consumption_kwh = 0
-    feedin_kwh = 0
-    purchased_kwh = 0
+    result = {
+        "production": 0,
+        "consumption": 0,
+        "self": 0,
+        "feed": 0,
+        "purchased": 0,
+    }
 
     for q in quarters:
-        production_kwh += q.get("productionWh", 0) / 1000
-        consumption_kwh += q.get("consumptionWh", 0) / 1000
-        self_consumption_kwh += q.get("selfConsumptionWh", 0) / 1000
-        feedin_kwh += q.get("feedInWh", 0) / 1000
-        purchased_kwh += q.get("purchasedWh", 0) / 1000
+        result["production"] += q["productionWh"] / 1000
+        result["consumption"] += q["consumptionWh"] / 1000
+        result["self"] += q["selfConsumptionWh"] / 1000
+        result["feed"] += q["feedInWh"] / 1000
+        result["purchased"] += q["purchasedWh"] / 1000
 
     return {
-        "date": power_data.get("date"),
-        "from": power_data.get("from"),
-        "to": power_data.get("to"),
-        "productionKwhUntilNow": round(production_kwh, 3),
-        "consumptionKwhUntilNow": round(consumption_kwh, 3),
-        "selfConsumptionKwhUntilNow": round(self_consumption_kwh, 3),
-        "feedInKwhUntilNow": round(feedin_kwh, 3),
-        "purchasedKwhUntilNow": round(purchased_kwh, 3),
+        "date": power_data["date"],
+        "from": power_data["from"],
+        "to": power_data["to"],
+        "productionKwhUntilNow": round(result["production"], 3),
+        "consumptionKwhUntilNow": round(result["consumption"], 3),
+        "selfConsumptionKwhUntilNow": round(result["self"], 3),
+        "feedInKwhUntilNow": round(result["feed"], 3),
+        "purchasedKwhUntilNow": round(result["purchased"], 3),
         "intervalsCount": len(quarters),
     }
 
 
+# ──────────────────────────────
+# ACUMULADO DESDE CONTRATO (FIABLE)
+# ──────────────────────────────
+
 def build_solaredge_month_payload():
     now = get_local_now()
-    end_time = floor_to_quarter(now)
-
-    data = fetch_solaredge(
-        "powerDetails",
-        {
-            "timeUnit": "QUARTER_OF_AN_HOUR",
-            "startTime": f"{NEXUS_START_DATE} 00:00:00",
-            "endTime": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
-        },
-    )
-
-    if data.get("error"):
-        return data
-
-    meters = data.get("powerDetails", {}).get("meters", [])
+    end_date = now.date()
+    start_date = datetime.strptime(NEXUS_START_DATE, "%Y-%m-%d").date()
 
     result = {
-        "productionKwhMonth": 0,
-        "consumptionKwhMonth": 0,
-        "selfConsumptionKwhMonth": 0,
-        "feedInKwhMonth": 0,
-        "purchasedKwhMonth": 0,
+        "production": 0,
+        "consumption": 0,
+        "self": 0,
+        "feed": 0,
+        "purchased": 0,
     }
 
-    mapping = {
-        "Production": "productionKwhMonth",
-        "Consumption": "consumptionKwhMonth",
-        "SelfConsumption": "selfConsumptionKwhMonth",
-        "FeedIn": "feedInKwhMonth",
-        "Purchased": "purchasedKwhMonth",
-    }
+    current = start_date
 
-    intervals_count = 0
+    while current <= end_date:
+        day_str = current.isoformat()
 
-    for meter in meters:
-        meter_type = meter.get("type")
-        key = mapping.get(meter_type)
+        data = fetch_solaredge(
+            "powerDetails",
+            {
+                "timeUnit": "QUARTER_OF_AN_HOUR",
+                "startTime": f"{day_str} 00:00:00",
+                "endTime": f"{day_str} 23:59:59",
+                "meters": "Production,Consumption,SelfConsumption,FeedIn,Purchased",
+            },
+        )
 
-        if not key:
+        if data.get("error"):
+            current += timedelta(days=1)
             continue
 
-        values = meter.get("values", [])
-        intervals_count = max(intervals_count, len(values))
+        meters = data.get("powerDetails", {}).get("meters", [])
 
-        for item in values:
-            value = item.get("value")
+        for meter in meters:
+            mtype = meter.get("type")
 
-            if value is None:
-                continue
+            for item in meter.get("values", []):
+                value = item.get("value")
+                if value is None:
+                    continue
 
-            result[key] += float(value) / 1000
+                kwh = float(value) / 1000
+
+                if mtype == "Production":
+                    result["production"] += kwh
+                elif mtype == "Consumption":
+                    result["consumption"] += kwh
+                elif mtype == "SelfConsumption":
+                    result["self"] += kwh
+                elif mtype == "FeedIn":
+                    result["feed"] += kwh
+                elif mtype == "Purchased":
+                    result["purchased"] += kwh
+
+        current += timedelta(days=1)
 
     return {
         "from": f"{NEXUS_START_DATE} 00:00:00",
-        "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "to": now.strftime("%Y-%m-%d %H:%M:%S"),
         "label": "Desde inicio contrato",
-
-        "productionKwhMonth": round(result["productionKwhMonth"], 3),
-        "consumptionKwhMonth": round(result["consumptionKwhMonth"], 3),
-        "selfConsumptionKwhMonth": round(result["selfConsumptionKwhMonth"], 3),
-        "feedInKwhMonth": round(result["feedInKwhMonth"], 3),
-        "purchasedKwhMonth": round(result["purchasedKwhMonth"], 3),
-
-        "productionKwh": round(result["productionKwhMonth"], 3),
-        "consumptionKwh": round(result["consumptionKwhMonth"], 3),
-        "selfConsumptionKwh": round(result["selfConsumptionKwhMonth"], 3),
-        "feedInKwh": round(result["feedInKwhMonth"], 3),
-        "purchasedKwh": round(result["purchasedKwhMonth"], 3),
-
-        "intervalsCount": intervals_count,
+        "productionKwh": round(result["production"], 3),
+        "consumptionKwh": round(result["consumption"], 3),
+        "selfConsumptionKwh": round(result["self"], 3),
+        "feedInKwh": round(result["feed"], 3),
+        "purchasedKwh": round(result["purchased"], 3),
     }
 
+
+# ──────────────────────────────
+# METERS RAW
+# ──────────────────────────────
 
 def build_solaredge_meters_payload():
     now = get_local_now()
@@ -523,8 +538,6 @@ def build_solaredge_meters_payload():
             "meters": "Production,Consumption,FeedIn,Purchased",
         },
     )
-
-
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE ENDPOINTS                                             ║
 # ╚════════════════════════════════════════════════════════════╝
