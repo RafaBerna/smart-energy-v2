@@ -62,11 +62,26 @@ NEXUS_START_DATE = "2026-04-04"
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
+# CONFIG
+# ──────────────────────────────
+
+DB_PATH = os.getenv(
+    "DATABASE_PATH",
+    "/data/omie.db" if os.path.exists("/data") else "database/omie.db"
+)
+
+
+# ──────────────────────────────
 # INITIALIZATION
 # ──────────────────────────────
 
 def init_db():
-    conn = sqlite3.connect("/data/omie.db")
+    db_dir = os.path.dirname(DB_PATH)
+
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
     with open("database/schema.sql", "r", encoding="utf-8") as f:
@@ -84,10 +99,9 @@ init_db()
 # ──────────────────────────────
 
 def get_db_connection():
-    conn = sqlite3.connect("/data/omie.db")
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
-
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ OMIE DATA                                                              ║
@@ -1024,4 +1038,63 @@ def import_omie_range(start: str, end: str):
         "status": "ok",
         "imported": imported,
         "failed": failed,
+    }
+
+# ╔════════════════════════════════════════════════════════════╗
+# ║ DATADIS / E-DISTRIBUCIÓN DATA                              ║
+# ╚════════════════════════════════════════════════════════════╝
+
+# ──────────────────────────────
+# DATADIS DAYS
+# ──────────────────────────────
+
+@app.get("/datadis-days/latest")
+def get_latest_datadis_day():
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    row = cursor.execute("""
+        SELECT
+            date,
+            grid_consumed_kwh,
+            feed_in_kwh,
+            hours_count,
+            expected_hours,
+            real_hours_count,
+            estimated_hours_count,
+            is_complete,
+            data_quality,
+            quality_note,
+            source_file,
+            updated_at
+        FROM datadis_days
+        WHERE is_complete = 1
+        ORDER BY date DESC
+        LIMIT 1
+    """).fetchone()
+
+    conn.close()
+
+    if row is None:
+        return {
+            "status": "empty",
+            "message": "No Datadis data found"
+        }
+
+    return {
+        "status": "ok",
+        "date": row["date"],
+        "gridConsumedKwh": row["grid_consumed_kwh"],
+        "feedInKwh": row["feed_in_kwh"],
+        "hoursCount": row["hours_count"],
+        "expectedHours": row["expected_hours"],
+        "realHoursCount": row["real_hours_count"],
+        "estimatedHoursCount": row["estimated_hours_count"],
+        "isComplete": bool(row["is_complete"]),
+        "dataQuality": row["data_quality"],
+        "qualityNote": row["quality_note"],
+        "sourceFile": row["source_file"],
+        "updatedAt": row["updated_at"],
+        "source": "datadis"
     }
