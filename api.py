@@ -19,8 +19,9 @@ app.add_middleware(
 SOLAREDGE_API_KEY = os.getenv("SOLAREDGE_API_KEY")
 SOLAREDGE_SITE_ID = os.getenv("SOLAREDGE_SITE_ID")
 
+
 # ╔════════════════════════════════════════════════════════════╗
-# ║ DATABASE                                                               ║
+# ║ DATABASE                                                   ║
 # ╚════════════════════════════════════════════════════════════╝
 
 def init_db():
@@ -33,25 +34,18 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 init_db()
+
 
 def get_db_connection():
     conn = sqlite3.connect("/data/omie.db")
     conn.row_factory = sqlite3.Row
     return conn
 
-# ╔════════════════════════════════════════════════════════════╗
-# ║ DATES                                                                  ║
-# ╚════════════════════════════════════════════════════════════╝
-
-def get_today_date():
-    return datetime.now().date().isoformat()
-
-def get_tomorrow_date():
-    return (datetime.now().date() + timedelta(days=1)).isoformat()
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE DATA                                                              ║
+# ║ OMIE DATA                                                  ║
 # ╚════════════════════════════════════════════════════════════╝
 
 def get_latest_day_row():
@@ -69,6 +63,7 @@ def get_latest_day_row():
     conn.close()
     return row
 
+
 def build_day_payload(day):
     if day is None:
         return {"error": "No data"}
@@ -79,6 +74,7 @@ def build_day_payload(day):
         "min_price": round(day["min_price"] / 1000, 5),
         "max_price": round(day["max_price"] / 1000, 5),
     }
+
 
 def build_latest_hours_payload():
     conn = get_db_connection()
@@ -121,6 +117,7 @@ def build_latest_hours_payload():
         "worst_hour": worst,
     }
 
+
 def build_hours_payload_by_date(target_date: str):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -161,6 +158,7 @@ def build_hours_payload_by_date(target_date: str):
         "best_hour": best,
         "worst_hour": worst,
     }
+
 
 def build_latest_periods_payload():
     conn = get_db_connection()
@@ -203,6 +201,7 @@ def build_latest_periods_payload():
         ],
     }
 
+
 def build_periods_payload_by_date(target_date: str):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -235,6 +234,7 @@ def build_periods_payload_by_date(target_date: str):
         ],
     }
 
+
 def build_price_days_history_payload(limit: int = 30):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -261,8 +261,9 @@ def build_price_days_history_payload(limit: int = 30):
         ]
     }
 
+
 # ╔════════════════════════════════════════════════════════════╗
-# ║ SOLAREDGE DATA                                                         ║
+# ║ SOLAREDGE DATA                                             ║
 # ╚════════════════════════════════════════════════════════════╝
 
 NEXUS_START_DATE = "2026-04-04"
@@ -353,7 +354,6 @@ def build_solaredge_power_quarters_today_payload():
         return data
 
     meters = data.get("powerDetails", {}).get("meters", [])
-
     quarters = {}
 
     for meter in meters:
@@ -489,15 +489,23 @@ def build_solaredge_month_payload():
 
             result[key] += float(value) / 1000
 
-  return {
+    return {
         "from": f"{NEXUS_START_DATE} 00:00:00",
         "to": end_time.strftime("%Y-%m-%d %H:%M:%S"),
         "label": "Desde inicio contrato",
+
+        "productionKwhMonth": round(result["productionKwhMonth"], 3),
+        "consumptionKwhMonth": round(result["consumptionKwhMonth"], 3),
+        "selfConsumptionKwhMonth": round(result["selfConsumptionKwhMonth"], 3),
+        "feedInKwhMonth": round(result["feedInKwhMonth"], 3),
+        "purchasedKwhMonth": round(result["purchasedKwhMonth"], 3),
+
         "productionKwh": round(result["productionKwhMonth"], 3),
         "consumptionKwh": round(result["consumptionKwhMonth"], 3),
         "selfConsumptionKwh": round(result["selfConsumptionKwhMonth"], 3),
         "feedInKwh": round(result["feedInKwhMonth"], 3),
         "purchasedKwh": round(result["purchasedKwhMonth"], 3),
+
         "intervalsCount": intervals_count,
     }
 
@@ -518,7 +526,7 @@ def build_solaredge_meters_payload():
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE ENDPOINTS                                                         ║
+# ║ OMIE ENDPOINTS                                             ║
 # ╚════════════════════════════════════════════════════════════╝
 
 @app.get("/price-day/latest")
@@ -552,7 +560,7 @@ def get_price_days_history(limit: int = 30):
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ SOLAREDGE ENDPOINTS                                                    ║
+# ║ SOLAREDGE ENDPOINTS                                        ║
 # ╚════════════════════════════════════════════════════════════╝
 
 @app.get("/solar-edge/current")
@@ -579,8 +587,9 @@ def get_solaredge_power_quarters_today():
 def get_solar_edge_meters():
     return build_solaredge_meters_payload()
 
+
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE IMPORT ENDPOINTS                                                  ║
+# ║ OMIE IMPORT ENDPOINTS                                      ║
 # ╚════════════════════════════════════════════════════════════╝
 
 @app.get("/import-omie")
@@ -595,6 +604,7 @@ def import_omie():
     process_latest_available(html)
 
     return {"status": "ok"}
+
 
 @app.get("/import-omie-range")
 def import_omie_range(start: str, end: str):
