@@ -7,7 +7,7 @@ from urllib.parse import urljoin
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ CONFIGURATION                                              ║
+# ║ CONFIGURATION                                                          ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -30,7 +30,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ DATE HELPERS                                               ║
+# ║ DATE HELPERS                                                           ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -61,7 +61,7 @@ def get_date_range(start_date_str, end_date_str):
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE DOWNLOAD                                              ║
+# ║ OMIE DOWNLOAD                                                          ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -136,7 +136,7 @@ def fetch_omie_file(download_url):
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE PARSING                                               ║
+# ║ OMIE PARSING                                                           ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -170,7 +170,7 @@ def parse_omie_periods(text):
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ OMIE AGGREGATION                                           ║
+# ║ OMIE AGGREGATION                                                       ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -198,7 +198,7 @@ def build_hour_rows(period_prices):
 
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ DATABASE                                                   ║
+# ║ DATABASE                                                               ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -279,9 +279,33 @@ def save_to_db(date_iso, period_prices, hour_rows):
 
     print(f"✔ Guardado {date_iso}")
 
+# ──────────────────────────────
+# CHECK PRICE DAY EXISTS
+# ──────────────────────────────
+
+def price_day_exists(date_iso):
+    conn = sqlite3.connect("/data/omie.db")
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT 1
+            FROM price_days
+            WHERE date = ?
+            LIMIT 1
+        """, (date_iso,))
+
+        exists = cursor.fetchone() is not None
+
+    except sqlite3.OperationalError:
+        exists = False
+
+    conn.close()
+    return exists
+
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ PROCESSING                                                 ║
+# ║ PROCESSING                                                             ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
@@ -343,7 +367,7 @@ def process_latest_available(html):
     print("\nNo se encontraron datos ni para mañana, ni para hoy, ni para ayer.")
 
 # ╔════════════════════════════════════════════════════════════╗
-# ║ CLI EXECUTION                                              ║
+# ║ CLI EXECUTION                                                          ║
 # ╚════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────
