@@ -342,29 +342,19 @@ def process_date(date_iso, date_compact, html):
 # ──────────────────────────────
 
 def process_latest_available(html):
-    # Primero intenta mañana
     tomorrow_iso, tomorrow_compact = get_date_from_offset(-1)
 
+    if price_day_exists(tomorrow_iso):
+        print(f"\nMañana ya existe en BD: {tomorrow_iso}. No se busca de nuevo.")
+        return
+
+    print(f"\nIntentando cargar mañana: {tomorrow_iso}")
+
     if process_date(tomorrow_iso, tomorrow_compact, html):
+        print(f"\nMañana importado correctamente: {tomorrow_iso}")
         return
 
-    print("\nNo hay datos de mañana. Se intenta con hoy...")
-
-    # Si mañana no existe, prueba hoy
-    today_iso, today_compact = get_date_from_offset(0)
-
-    if process_date(today_iso, today_compact, html):
-        return
-
-    print("\nNo hay datos de hoy. Se intenta con ayer...")
-
-    # Fallback de seguridad
-    yesterday_iso, yesterday_compact = get_date_from_offset(1)
-
-    if process_date(yesterday_iso, yesterday_compact, html):
-        return
-
-    print("\nNo se encontraron datos ni para mañana, ni para hoy, ni para ayer.")
+    print(f"\nMañana aún no está publicado en OMIE: {tomorrow_iso}. Se sale sin refrescar hoy.")
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ CLI EXECUTION                                                          ║
