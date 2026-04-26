@@ -1367,3 +1367,228 @@ def get_daily_energy_summary(
         ],
         "source": "datadis_weather"
     }
+
+# ──────────────────────────────
+# HOME INTELLIGENCE
+# ──────────────────────────────
+
+@app.get("/home/intelligence")
+def get_home_intelligence():
+    now = datetime.now(ZoneInfo("Europe/Madrid"))
+    today = now.date().isoformat()
+    current_hour_index = now.hour + 1
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    hourly_rows = cursor.execute("""
+        SELECT
+            h.hour_index,
+            ROUND(AVG(h.feed_in_kwh), 3) AS avg_feed_in_kwh,
+            ROUND(AVG(h.grid_consumed_kwh), 3) AS avg_grid_consumed_kwh
+        FROM datadis_hours h
+        JOIN datadis_days d
+          ON d.cups = h.cups
+         AND d.date = h.date
+        WHERE d.is_complete = 1
+          AND d.data_quality = 'complete_real'
+          AND d.date >= '2026-03-01'
+        GROUP BY h.hour_index
+        ORDER BY h.hour_index
+    """).fetchall()
+
+    if not hourly_rows:
+        conn.close()
+        return {
+            "status": "empty",
+            "message": "No hay datos Datadis suficientes para generar inteligencia de Home",
+            "source": "home_intelligence"
+        }
+
+    feed_by_hour = {
+        row["hour_index"]: row["avg_feed_in_kwh"] or 0
+        for row in hourly_rows
+    }
+
+    useful_hours = [
+        hour for hour, feed in feed_by_hour.items()
+        if feed >= 0.20
+    ]
+
+    strong_hours = [
+        hour for hour, feed in feed_by_hour.items()
+        if feed >= 1.00
+    ]
+
+    useful_start = min(useful_hours) if useful_hours else None
+    useful_end = max(useful_hours) if useful_hours else None
+
+    strong_start = min(strong_hours) if strong_hours else useful_start
+    strong_end = max(strong_hours) if strong_hours else useful_end
+
+    if useful_start is None or useful_end is None:
+        solar_phase = "no_solar"
+        risk_level = "medium"
+        headline = "Sin ventana solar clara"
+        recommendation = "No hay suficiente patrón de excedente solar para recomendar cargas fuertes."
+    elif current_hour_index < useful_start:
+        solar_phase = "before_solar"
+        risk_level = "medium"
+        headline = "Aún es pronto para cargas fuertes"
+        recommendation = "Todavía no suele haber excedente solar suficiente. Mejor esperar al inicio de la ventana solar."
+    elif current_hour_index < strong_start:
+        solar_phase = "morning_start"
+        risk_level = "medium"
+        headline = "Empieza la ventana solar"
+        recommendation = "El sol empieza a cubrir consumo, pero conviene esperar a la zona central para cargas largas."
+    elif strong_start <= current_hour_index <= strong_end:
+        solar_phase = "central_safe"
+        risk_level = "low"
+        headline = "Buen momento para consumir con solar"
+        recommendation = "Estás dentro de la zona solar fuerte. Buen momento para lavadora, secadora o aire acondicionado."
+    elif current_hour_index <= useful_end:
+        solar_phase = "export_decline"
+        risk_level = "high"
+        headline = "Final de vertido: cuidado"
+        recommendation = "El excedente suele ir de bajada. Evita iniciar ciclos largos si el precio de red es alto."
+    else:
+        solar_phase = "no_solar"
+        risk_level = "high"
+        headline = "Fuera de ventana solar"
+        recommendation = "Ya no suele haber excedente suficiente. Las cargas fuertes probablemente tirarán de red."
+
+    price_row = cursor.execute("""
+        SELECT
+            pd.date,
+            ph.hour,
+            ph.price
+        FROM price_days pd
+        JOIN price_hours ph
+          ON ph.price_day_id = pd.id
+        WHERE pd.date = ?
+          AND ph.hour = ?
+        LIMIT 1
+    """, (today, current_hour_index)).fetchone()
+
+    current_price = None
+    price_date = None
+
+    if price_row:
+        current_price = price_row["price"]
+        price_date = price_row["date"]
+
+    period_row = cursor.execute("""
+        SELECT
+            ROUND(SUM(grid_consumed_kwh), 3) AS grid_consumed_kwh,
+            ROUND(SUM(feed_in_kwh), 3) AS feed_in_kwh,
+            COUNT(*) AS days_count,
+            MIN(date) AS first_date,
+            MAX(date) AS last_date
+        FROM datadis_days
+        WHERE date >= ?
+          AND is_complete = 1
+          AND data_quality = 'complete_real'
+    """, (NEXUS_START_DATE,)).fetchone()
+
+    latest_fingerprint = cursor.execute("""
+        SELECT
+            d.date,
+            d.grid_consumed_kwh,
+            d.feed_in_kwh,
+            w.solar_quality,
+            w.shortwave_radiation_sum,
+            w.cloud_cover_avg_percent
+        FROM datadis_days d
+        JOIN weather_days w
+          ON w.date = d.date
+        WHERE d.is_complete = 1
+          AND d.data_quality = 'complete_real'
+          AND w.data_quality = 'complete'
+        ORDER BY d.date DESC
+        LIMIT 1
+    """).fetchone()
+
+    conn.close()
+
+    solar_window_message = (
+        f"Según tus días reales, el excedente suele empezar sobre la hora {useful_start}, "
+        f"la zona fuerte va aproximadamente de {strong_start} a {strong_end}, "
+        f"y el tramo final llega hasta la hora {useful_end}."
+        if useful_start and useful_end
+        else "No hay ventana solar suficiente calculada todavía."
+    )
+
+    cards = [
+        {
+            "type": "now",
+            "title": "Ahora",
+            "message": recommendation,
+            "solarPhase": solar_phase,
+            "riskLevel": risk_level,
+        },
+        {
+            "type": "solar_window",
+            "title": "Ventana solar útil",
+            "message": solar_window_message,
+            "usefulStartHour": useful_start,
+            "strongStartHour": strong_start,
+            "strongEndHour": strong_end,
+            "usefulEndHour": useful_end,
+        },
+        {
+            "type": "strong_loads",
+            "title": "Cargas fuertes",
+            "message": (
+                "Prioriza lavadora, secadora o aire acondicionado dentro de la zona central. "
+                "Evita iniciar ciclos largos en el final del vertido si el precio es alto."
+            ),
+        },
+        {
+            "type": "contract_period",
+            "title": "Desde inicio contrato",
+            "message": "Acumulado real según Datadis/e-distribución.",
+            "startDate": NEXUS_START_DATE,
+            "firstAvailableDate": period_row["first_date"],
+            "lastAvailableDate": period_row["last_date"],
+            "daysCount": period_row["days_count"],
+            "gridConsumedKwh": period_row["grid_consumed_kwh"] or 0,
+            "feedInKwh": period_row["feed_in_kwh"] or 0,
+        },
+    ]
+
+    if latest_fingerprint:
+        cards.append({
+            "type": "latest_pattern",
+            "title": "Último día analizado",
+            "message": (
+                f"El {latest_fingerprint['date']} fue un día "
+                f"{latest_fingerprint['solar_quality']} con "
+                f"{latest_fingerprint['feed_in_kwh']} kWh vertidos."
+            ),
+            "date": latest_fingerprint["date"],
+            "gridConsumedKwh": latest_fingerprint["grid_consumed_kwh"],
+            "feedInKwh": latest_fingerprint["feed_in_kwh"],
+            "solarQuality": latest_fingerprint["solar_quality"],
+            "shortwaveRadiationSum": latest_fingerprint["shortwave_radiation_sum"],
+            "cloudCoverAvgPercent": latest_fingerprint["cloud_cover_avg_percent"],
+        })
+
+    return {
+        "status": "ok",
+        "date": today,
+        "currentHourIndex": current_hour_index,
+        "headline": headline,
+        "recommendation": recommendation,
+        "solarPhase": solar_phase,
+        "riskLevel": risk_level,
+        "currentPrice": current_price,
+        "priceDate": price_date,
+        "solarWindow": {
+            "usefulStartHour": useful_start,
+            "strongStartHour": strong_start,
+            "strongEndHour": strong_end,
+            "usefulEndHour": useful_end,
+        },
+        "cards": cards,
+        "source": "home_intelligence"
+    }
