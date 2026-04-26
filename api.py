@@ -406,11 +406,11 @@ def build_solaredge_quarters_today_payload():
     purchased_kwh = 0
 
     for q in quarters:
-        production_kwh += q.get("productionW", 0) / 1000
-consumption_kwh += q.get("consumptionW", 0) / 1000
-self_consumption_kwh += q.get("selfConsumptionW", 0) / 1000
-feedin_kwh += q.get("feedInW", 0) / 1000
-purchased_kwh += q.get("purchasedW", 0) / 1000
+        production_kwh += q.get("productionW", 0) * 0.25 / 1000
+        consumption_kwh += q.get("consumptionW", 0) * 0.25 / 1000
+        self_consumption_kwh += q.get("selfConsumptionW", 0) * 0.25 / 1000
+        feedin_kwh += q.get("feedInW", 0) * 0.25 / 1000
+        purchased_kwh += q.get("purchasedW", 0) * 0.25 / 1000
 
     return {
         "date": power_data.get("date"),
