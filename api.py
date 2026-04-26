@@ -1316,3 +1316,54 @@ def get_daily_energy_fingerprints(
         "items": fingerprints,
         "source": "datadis_weather"
     }
+
+# ──────────────────────────────
+# DAILY SUMMARY
+# ──────────────────────────────
+
+@app.get("/energy-intelligence/daily-summary")
+def get_daily_energy_summary(
+    start: str = "2026-03-01",
+    end: str | None = None,
+    days: int = 10,
+    includeEstimated: bool = False
+):
+    fingerprints_response = get_daily_energy_fingerprints(
+        start=start,
+        end=end,
+        includeEstimated=includeEstimated
+    )
+
+    items = fingerprints_response["items"]
+
+    latest_items = list(reversed(items[-days:]))
+
+    return {
+        "status": "ok",
+        "startDate": start,
+        "endDate": end,
+        "daysRequested": days,
+        "daysReturned": len(latest_items),
+        "includeEstimated": includeEstimated,
+        "qualityMode": fingerprints_response["qualityMode"],
+        "referenceFeedInPerRadiation": fingerprints_response["referenceFeedInPerRadiation"],
+        "items": [
+            {
+                "date": item["date"],
+                "gridConsumedKwh": item["gridConsumedKwh"],
+                "feedInKwh": item["feedInKwh"],
+                "solarQuality": item["solarQuality"],
+                "tempAvgC": item["tempAvgC"],
+                "tempMaxC": item["tempMaxC"],
+                "cloudCoverAvgPercent": item["cloudCoverAvgPercent"],
+                "shortwaveRadiationSum": item["shortwaveRadiationSum"],
+                "feedInPerRadiation": item["feedInPerRadiation"],
+                "hiddenConsumptionSignal": item["hiddenConsumptionSignal"],
+                "dayType": item["dayType"],
+                "interpretation": item["interpretation"],
+                "datadisQuality": item["datadisQuality"],
+            }
+            for item in latest_items
+        ],
+        "source": "datadis_weather"
+    }
