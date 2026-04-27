@@ -1591,6 +1591,158 @@ def get_best_grid_hours_for_home(
         "items": best_hours
     }
 
+def get_today_solar_forecast_for_home():
+    from scripts.fetch_weather import (
+        LATITUDE,
+        LONGITUDE,
+        TIMEZONE,
+        classify_solar_quality,
+    )
+
+    forecast_url = "https://api.open-meteo.com/v1/forecast"
+
+    today = datetime.now(ZoneInfo("Europe/Madrid")).date().isoformat()
+
+    params = {
+        "latitude": LATITUDE,
+        "longitude": LONGITUDE,
+        "hourly": ",".join([
+            "temperature_2m",
+            "cloud_cover",
+            "shortwave_radiation",
+            "direct_radiation",
+            "diffuse_radiation",
+            "sunshine_duration",
+            "precipitation",
+        ]),
+        "timezone": TIMEZONE,
+        "start_date": today,
+        "end_date": today,
+    }
+
+    try:
+        response = requests.get(
+            forecast_url,
+            params=params,
+            timeout=30,
+        )
+
+        response.raise_for_status()
+        payload = response.json()
+
+        hourly = payload.get("hourly")
+
+        if not hourly:
+            return {
+                "status": "unavailable",
+                "date": today,
+                "solarForecastQuality": "unknown",
+                "solarQuality": "unknown",
+                "headline": "Previsión solar no disponible",
+                "message": "No hay previsión solar disponible para hoy.",
+                "source": "open_meteo_forecast",
+            }
+
+        shortwave_values = [
+            value for value in hourly.get("shortwave_radiation", [])
+            if value is not None
+        ]
+
+        direct_values = [
+            value for value in hourly.get("direct_radiation", [])
+            if value is not None
+        ]
+
+        cloud_values = [
+            value for value in hourly.get("cloud_cover", [])
+            if value is not None
+        ]
+
+        sunshine_values = [
+            value for value in hourly.get("sunshine_duration", [])
+            if value is not None
+        ]
+
+        precipitation_values = [
+            value for value in hourly.get("precipitation", [])
+            if value is not None
+        ]
+
+        shortwave_sum = round(sum(shortwave_values), 3) if shortwave_values else None
+        direct_sum = round(sum(direct_values), 3) if direct_values else None
+
+        cloud_avg = (
+            round(sum(cloud_values) / len(cloud_values), 3)
+            if cloud_values
+            else None
+        )
+
+        sunshine_sum = round(sum(sunshine_values), 3) if sunshine_values else None
+
+        precipitation_sum = (
+            round(sum(precipitation_values), 3)
+            if precipitation_values
+            else None
+        )
+
+        solar_quality = classify_solar_quality(
+            shortwave_sum,
+            cloud_avg,
+        )
+
+        if solar_quality in ("sunny", "mostly_sunny"):
+            solar_forecast_quality = "strong"
+            headline = "Hoy se espera buena ventana solar"
+            message = (
+                "La previsión de radiación y nubosidad apunta a un día favorable. "
+                "La zona central debería ser el mejor tramo para cargas fuertes."
+            )
+        elif solar_quality == "mixed":
+            solar_forecast_quality = "medium"
+            headline = "Hoy se espera ventana solar irregular"
+            message = (
+                "La previsión apunta a un día mixto. Puede haber excedente, "
+                "pero con posibles bajadas por nubes."
+            )
+        elif solar_quality == "cloudy":
+            solar_forecast_quality = "weak"
+            headline = "Hoy la ventana solar será débil"
+            message = (
+                "La previsión marca baja radiación o mucha nubosidad. "
+                "Conviene mirar también las horas baratas de red."
+            )
+        else:
+            solar_forecast_quality = "unknown"
+            headline = "Previsión solar no concluyente"
+            message = "No hay datos suficientes para estimar bien la ventana solar de hoy."
+
+        return {
+            "status": "ok",
+            "date": today,
+            "solarForecastQuality": solar_forecast_quality,
+            "solarQuality": solar_quality,
+            "headline": headline,
+            "message": message,
+            "shortwaveRadiationSum": shortwave_sum,
+            "directRadiationSum": direct_sum,
+            "cloudCoverAvgPercent": cloud_avg,
+            "sunshineDurationSeconds": sunshine_sum,
+            "precipitationSumMm": precipitation_sum,
+            "source": "open_meteo_forecast",
+        }
+
+    except Exception as exc:
+        return {
+            "status": "error",
+            "date": today,
+            "solarForecastQuality": "unknown",
+            "solarQuality": "unknown",
+            "headline": "Previsión solar no disponible",
+            "message": "No se ha podido cargar la previsión solar de hoy.",
+            "error": str(exc),
+            "source": "open_meteo_forecast",
+        }
+
 # ──────────────────────────────
 # HOME INTELLIGENCE
 # ──────────────────────────────
@@ -1711,6 +1863,8 @@ def get_home_intelligence():
     best_grid_hours = best_grid_hours_result["items"]
     best_grid_hours_date = best_grid_hours_result["date"]
 
+    today_solar_forecast = get_today_solar_forecast_for_home()
+
     period_row = cursor.execute("""
         SELECT
             ROUND(SUM(grid_consumed_kwh), 3) AS grid_consumed_kwh,
@@ -1771,6 +1925,21 @@ def get_home_intelligence():
             "message": recommendation,
             "solarPhase": solar_phase,
             "riskLevel": risk_level,
+        },
+        {
+            "type": "today_solar_forecast",
+            "title": "Previsión solar de hoy",
+            "message": today_solar_forecast["message"],
+            "headline": today_solar_forecast["headline"],
+            "status": today_solar_forecast["status"],
+            "date": today_solar_forecast["date"],
+            "solarForecastQuality": today_solar_forecast["solarForecastQuality"],
+            "solarQuality": today_solar_forecast["solarQuality"],
+            "shortwaveRadiationSum": today_solar_forecast.get("shortwaveRadiationSum"),
+            "directRadiationSum": today_solar_forecast.get("directRadiationSum"),
+            "cloudCoverAvgPercent": today_solar_forecast.get("cloudCoverAvgPercent"),
+            "sunshineDurationSeconds": today_solar_forecast.get("sunshineDurationSeconds"),
+            "precipitationSumMm": today_solar_forecast.get("precipitationSumMm"),
         },
         {
             "type": "solar_window",
@@ -1836,6 +2005,7 @@ def get_home_intelligence():
         "riskLevel": risk_level,
         "currentPrice": current_price,
         "priceDate": price_date,
+        "todaySolarForecast": today_solar_forecast,
         "bestGridHours": best_grid_hours,
         "bestGridHoursDate": best_grid_hours_date,
         "solarWindow": {
