@@ -1513,6 +1513,85 @@ def get_daily_energy_summary(
     }
 
 # ──────────────────────────────
+# HOME INTELLIGENCE HELPERS
+# ──────────────────────────────
+
+def get_best_grid_hours_for_home(
+    cursor,
+    target_date: str,
+    useful_start: int | None,
+    useful_end: int | None,
+    limit: int = 3
+):
+    price_day_row = cursor.execute("""
+        SELECT date
+        FROM price_days
+        WHERE date = ?
+        LIMIT 1
+    """, (target_date,)).fetchone()
+
+    if price_day_row:
+        price_date = price_day_row["date"]
+    else:
+        latest_price_day = cursor.execute("""
+            SELECT date
+            FROM price_days
+            ORDER BY date DESC
+            LIMIT 1
+        """).fetchone()
+
+        price_date = latest_price_day["date"] if latest_price_day else None
+
+    if not price_date:
+        return {
+            "date": None,
+            "items": []
+        }
+
+    price_rows = cursor.execute("""
+        SELECT
+            ph.hour,
+            ph.price
+        FROM price_days pd
+        JOIN price_hours ph
+          ON ph.price_day_id = pd.id
+        WHERE pd.date = ?
+        ORDER BY ph.price ASC
+    """, (price_date,)).fetchall()
+
+    best_hours = []
+
+    for row in price_rows:
+        hour = row["hour"]
+
+        is_outside_solar_window = (
+            useful_start is None
+            or useful_end is None
+            or hour < useful_start
+            or hour > useful_end
+        )
+
+        if not is_outside_solar_window:
+            continue
+
+        start_hour = (hour - 1) % 24
+        end_hour = hour % 24
+
+        best_hours.append({
+            "hour": hour,
+            "label": f"{start_hour:02d}:00-{end_hour:02d}:00",
+            "price": row["price"],
+        })
+
+        if len(best_hours) >= limit:
+            break
+
+    return {
+        "date": price_date,
+        "items": best_hours
+    }
+
+# ──────────────────────────────
 # HOME INTELLIGENCE
 # ──────────────────────────────
 
@@ -1621,6 +1700,17 @@ def get_home_intelligence():
         current_price = price_row["price"]
         price_date = price_row["date"]
 
+    best_grid_hours_result = get_best_grid_hours_for_home(
+        cursor=cursor,
+        target_date=today,
+        useful_start=useful_start,
+        useful_end=useful_end,
+        limit=3
+    )
+
+    best_grid_hours = best_grid_hours_result["items"]
+    best_grid_hours_date = best_grid_hours_result["date"]
+
     period_row = cursor.execute("""
         SELECT
             ROUND(SUM(grid_consumed_kwh), 3) AS grid_consumed_kwh,
@@ -1662,6 +1752,18 @@ def get_home_intelligence():
         else "No hay ventana solar suficiente calculada todavía."
     )
 
+    best_grid_hours_message = "No hay precios suficientes para calcular mejores horas de red."
+
+    if best_grid_hours:
+        best_hours_labels = ", ".join(
+            item["label"] for item in best_grid_hours
+        )
+
+        best_grid_hours_message = (
+            f"Si necesitas consumir fuera de la ventana solar, las mejores horas de red son: "
+            f"{best_hours_labels}."
+        )
+
     cards = [
         {
             "type": "now",
@@ -1686,6 +1788,13 @@ def get_home_intelligence():
                 "Prioriza lavadora, secadora o aire acondicionado dentro de la zona central. "
                 "Evita iniciar ciclos largos en el final del vertido si el precio es alto."
             ),
+        },
+        {
+            "type": "best_grid_hours",
+            "title": "Mejores horas fuera de solar",
+            "message": best_grid_hours_message,
+            "date": best_grid_hours_date,
+            "items": best_grid_hours,
         },
         {
             "type": "contract_period",
@@ -1727,6 +1836,8 @@ def get_home_intelligence():
         "riskLevel": risk_level,
         "currentPrice": current_price,
         "priceDate": price_date,
+        "bestGridHours": best_grid_hours,
+        "bestGridHoursDate": best_grid_hours_date,
         "solarWindow": {
             "usefulStartHour": useful_start,
             "strongStartHour": strong_start,
