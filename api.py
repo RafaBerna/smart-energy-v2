@@ -1242,6 +1242,70 @@ async def admin_import_datadis_json(
         "source": "admin_datadis_import"
     }
 
+# ──────────────────────────────
+# WEATHER IMPORT
+# ──────────────────────────────
+
+@app.post("/admin/import-weather")
+def admin_import_weather(
+    start: str = "2026-01-01",
+    end: str | None = None,
+    x_admin_token: str | None = Header(default=None)
+):
+    admin_token = os.getenv("ADMIN_TOKEN")
+
+    if not admin_token:
+        raise HTTPException(
+            status_code=500,
+            detail="ADMIN_TOKEN is not configured"
+        )
+
+    if x_admin_token != admin_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid admin token"
+        )
+
+    from scripts.fetch_weather import (
+        yesterday_madrid,
+        fetch_weather,
+        normalize_hourly_payload,
+        build_daily_summaries,
+        upsert_weather_hours,
+        upsert_weather_days,
+    )
+
+    end_date = end or yesterday_madrid()
+
+    try:
+        payload = fetch_weather(start, end_date)
+        rows = normalize_hourly_payload(payload)
+        summaries = build_daily_summaries(rows)
+
+        conn = get_db_connection()
+
+        try:
+            upsert_weather_hours(conn, rows)
+            upsert_weather_days(conn, summaries)
+            conn.commit()
+
+        finally:
+            conn.close()
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Weather import failed: {exc}"
+        )
+
+    return {
+        "status": "ok",
+        "startDate": start,
+        "endDate": end_date,
+        "hoursImported": len(rows),
+        "daysImported": len(summaries),
+        "source": "admin_weather_import"
+    }
 
 # ╔════════════════════════════════════════════════════════════╗
 # ║ ENERGY INTELLIGENCE                                                    ║
