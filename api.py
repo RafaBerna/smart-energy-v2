@@ -1743,6 +1743,121 @@ def get_today_solar_forecast_for_home():
             "source": "open_meteo_forecast",
         }
 
+def build_push_recommendations_for_home(
+    current_hour_index: int,
+    useful_start: int | None,
+    strong_start: int | None,
+    strong_end: int | None,
+    useful_end: int | None,
+    today_solar_forecast: dict,
+    best_grid_hours: list
+):
+    def hour_label(hour_index):
+        if hour_index is None:
+            return None
+
+        start_hour = (hour_index - 1) % 24
+        end_hour = hour_index % 24
+
+        return f"{start_hour:02d}:00-{end_hour:02d}:00"
+
+    def status_for(planned_hour):
+        if planned_hour is None:
+            return "unknown"
+
+        return "upcoming" if planned_hour >= current_hour_index else "passed"
+
+    recommendations = []
+
+    solar_forecast_quality = today_solar_forecast.get("solarForecastQuality")
+
+    if solar_forecast_quality == "strong":
+        recommendations.append({
+            "type": "daily_solar_forecast",
+            "title": "Hoy se espera buena ventana solar",
+            "message": "La previsión apunta a buen tramo solar. Prioriza cargas fuertes en la zona central.",
+            "plannedHour": useful_start,
+            "plannedLabel": hour_label(useful_start),
+            "status": status_for(useful_start),
+            "priority": "medium",
+        })
+
+    elif solar_forecast_quality == "medium":
+        recommendations.append({
+            "type": "daily_solar_forecast",
+            "title": "Hoy la ventana solar será irregular",
+            "message": "Puede haber excedente, pero con bajadas por nubes. Conviene combinar solar y horas baratas.",
+            "plannedHour": useful_start,
+            "plannedLabel": hour_label(useful_start),
+            "status": status_for(useful_start),
+            "priority": "medium",
+        })
+
+    elif solar_forecast_quality == "weak":
+        recommendations.append({
+            "type": "daily_solar_forecast",
+            "title": "Hoy la ventana solar será débil",
+            "message": "No conviene depender solo del excedente solar. Mira las mejores horas de red.",
+            "plannedHour": useful_start,
+            "plannedLabel": hour_label(useful_start),
+            "status": status_for(useful_start),
+            "priority": "high",
+        })
+
+    if strong_start and strong_end:
+        recommendations.append({
+            "type": "solar_strong_window",
+            "title": "Ventana solar fuerte",
+            "message": (
+                f"Tu mejor tramo solar previsto suele estar entre "
+                f"{hour_label(strong_start)} y {hour_label(strong_end)}. "
+                f"Buen momento para lavadora, secadora o aire acondicionado."
+            ),
+            "plannedHour": strong_start,
+            "plannedLabel": hour_label(strong_start),
+            "status": status_for(strong_start),
+            "priority": "high",
+        })
+
+    if strong_end and useful_end and strong_end < useful_end:
+        decline_hour = strong_end + 1
+
+        recommendations.append({
+            "type": "solar_decline_warning",
+            "title": "Última parte de la ventana solar",
+            "message": (
+                f"A partir de {hour_label(decline_hour)} el excedente suele ir de bajada. "
+                f"Evita iniciar ciclos largos si el precio de red es alto."
+            ),
+            "plannedHour": decline_hour,
+            "plannedLabel": hour_label(decline_hour),
+            "status": status_for(decline_hour),
+            "priority": "high",
+        })
+
+    if best_grid_hours:
+        best_labels = ", ".join(
+            item["label"] for item in best_grid_hours
+        )
+
+        first_best_hour = best_grid_hours[0]["hour"]
+
+        recommendations.append({
+            "type": "best_grid_hours",
+            "title": "Mejores horas fuera de solar",
+            "message": (
+                f"Si necesitas consumir de red, las mejores horas fuera de solar son: "
+                f"{best_labels}."
+            ),
+            "plannedHour": first_best_hour,
+            "plannedLabel": best_grid_hours[0]["label"],
+            "status": status_for(first_best_hour),
+            "priority": "medium",
+            "items": best_grid_hours,
+        })
+
+    return recommendations
+
 # ──────────────────────────────
 # HOME INTELLIGENCE
 # ──────────────────────────────
@@ -1864,6 +1979,16 @@ def get_home_intelligence():
     best_grid_hours_date = best_grid_hours_result["date"]
 
     today_solar_forecast = get_today_solar_forecast_for_home()
+
+    push_recommendations = build_push_recommendations_for_home(
+        current_hour_index=current_hour_index,
+        useful_start=useful_start,
+        strong_start=strong_start,
+        strong_end=strong_end,
+        useful_end=useful_end,
+        today_solar_forecast=today_solar_forecast,
+        best_grid_hours=best_grid_hours
+    )
 
     period_row = cursor.execute("""
         SELECT
@@ -2008,6 +2133,7 @@ def get_home_intelligence():
         "todaySolarForecast": today_solar_forecast,
         "bestGridHours": best_grid_hours,
         "bestGridHoursDate": best_grid_hours_date,
+        "pushRecommendations": push_recommendations,
         "solarWindow": {
             "usefulStartHour": useful_start,
             "strongStartHour": strong_start,
